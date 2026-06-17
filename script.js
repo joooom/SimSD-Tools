@@ -819,7 +819,7 @@ function renderRP(){
     const count=S.speeches[c.c]||0;
     const isCamara=S.committeeType==='camara';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
-    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${c.c.replace(/'/g,"\\'")}')">
+    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${c.c.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
       <span class="c-opt-flag">${flag}</span>
       <span class="c-opt-name">${dispName(c.c)}</span>
       <span class="c-opt-count">${count}</span>
