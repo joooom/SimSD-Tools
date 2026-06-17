@@ -1054,6 +1054,14 @@ function generateReport(){
     return `<tr style="${rowStyle}"><td style="text-align:center;color:#9c958e">${pos}º</td><td>${marker}${flag(s.c,s.f,s.i)}${nm(s.c)}${note}</td></tr>`;
   }).join('') : '';
 
+  const escapeHtmlAttr=(v)=>String(v??'')
+    .replace(/&/g,'&amp;')
+    .replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/'/g,'&#39;');
+  const appLogoSrc=escapeHtmlAttr((document.getElementById('app-logo')||{}).src||'');
+
   const reportHTML=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Relatório — ${S.config.committee} — ${S.config.session}</title>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -1089,7 +1097,7 @@ function generateReport(){
 <body>
   <button class="printbtn noprint" onclick="window.print()"><span class="material-icons inline-icon">print</span>Imprimir / Salvar PDF</button>
   <div class="rhead">
-    <img src="${(document.getElementById('app-logo')||{}).src||''}" style="height:56px">
+    <img src="${appLogoSrc}" style="height:56px">
     <div>
       <h1>${S.config.conference} — ${S.config.committee}</h1>
       <p>${S.config.session} · Relatório gerado em ${now}</p>
