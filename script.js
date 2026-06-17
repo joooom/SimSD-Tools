@@ -1235,7 +1235,7 @@ function renderVote(){
     // and ONLY in substantive votes. Procedural votes never allow abstention.
     const canAbstain=isSubstancial && S.presence[c.c]==='presente';
     const v=S.votes[c.c];
-    const esc=c.c.replace(/'/g,"\\'");
+    const esc=JSON.stringify(c.c).slice(1,-1).replace(/'/g,"\\'");
     if(v){const lv=voteLabels[v];return`<div class="v-row"><span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span><span class="vr-name">${nm}${sub}</span><span class="voted-tag ${lv.cls}">${lv.txt}</span><button class="vbtn vb-abst" onclick="castVote('${esc}',null)" style="font-size:10px;padding:2px 6px;margin-left:4px;display:inline-flex;align-items:center;"><span class="material-icons" style="font-size:11px;">undo</span></button></div>`;}
     const abstainBtn=canAbstain?`<button class="vbtn vb-abst"   onclick="castVote('${esc}','abs')">Abst.</button>`:'';
     return`<div class="v-row">
