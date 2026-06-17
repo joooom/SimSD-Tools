@@ -900,7 +900,7 @@ function renderPresence(){
   tbody.innerHTML=cc.map(c=>{
     const s=S.presence[c.c]||'ausente';
     const canVote=c.voto!==false;
-    const esc=c.c.replace(/'/g,"\\'");
+    const esc=c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
     const votanteOpt=canVote?`<option value="presente-votante" ${s==='presente-votante'?'selected':''}>Pres. Votante</option>`:'';
     const statusSel=`<select class="psel ps-${s.replace(' ','-')}" onchange="setPresence('${esc}',this.value,this)">
         <option value="presente" ${s==='presente'?'selected':''}>Presente</option>
