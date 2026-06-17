@@ -330,7 +330,7 @@ function renderCountryGrid(){
     const novote=isCamara&&!c.voto?'<span class="novote-tag">sem voto</span>':'';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
     const label=c.disp||c.c;
-    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${c.c.replace(/'/g,"\\'")}')" style="${isCamara?'min-height:46px':''}">
+    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')" style="${isCamara?'min-height:46px':''}">
       <span class="cf">${flag}</span>
       <span class="cn">${label}${novote}${sub}</span>
     </div>`;
