@@ -1,0 +1,526 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sim SD — Chair</title>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ════════════════════════════════════════
+     COMMITTEE CHOICE SCREEN (first screen)
+════════════════════════════════════════ -->
+<div id="committee-screen">
+  <div class="setup-header">
+    <img id="committee-logo" src="logo.png" alt="Sim SD">
+    <div class="setup-header-text">
+      <h1>Escolha o Comitê</h1>
+      <p>Selecione qual comitê será simulado</p>
+    </div>
+  </div>
+  <div class="committee-choice-body">
+    <div class="committee-cards" id="committee-cards">
+      <div class="committee-card" onclick="chooseCommittee('camara')">
+        <div class="cc-badge cc-camara">Câmara</div>
+        <div class="cc-name">Câmara dos Deputados</div>
+        <div class="cc-theme">PLP 152/2025 — Regulamentação do Trabalho por Aplicativos no Brasil</div>
+        <div class="cc-meta">25 representações · parlamentares, sociedade civil, plataformas e governo</div>
+      </div>
+      <div class="committee-card" onclick="chooseCommittee('unodc')">
+        <div class="cc-badge cc-onu">ONU</div>
+        <div class="cc-name">UNODC</div>
+        <div class="cc-theme">Vulnerabilidade Juvenil e Expansão do Uso de Drogas: O Crescente Uso de Cannabis</div>
+        <div class="cc-meta">Escritório das Nações Unidas sobre Drogas e Crime · 56 países</div>
+      </div>
+      <div class="committee-card" onclick="chooseCommittee('oea')">
+        <div class="cc-badge cc-onu">OEA</div>
+        <div class="cc-name">OEA</div>
+        <div class="cc-theme">Segurança regional nas Américas: desafios do crime organizado transnacional, intervenções externas e cooperação interamericana</div>
+        <div class="cc-meta">Organização dos Estados Americanos · 56 países</div>
+      </div>
+      <div class="committee-card" onclick="chooseCommittee('unesco')">
+        <div class="cc-badge cc-onu">ONU</div>
+        <div class="cc-name">UNESCO</div>
+        <div class="cc-theme">Impactos Educacionais do uso de IAs na Formação e Desenvolvimento da Juventude</div>
+        <div class="cc-meta">Org. das Nações Unidas para Educação, Ciência e Cultura · 56 países</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     SETUP SCREEN
+════════════════════════════════════════ -->
+<div id="setup-screen" class="hidden">
+  <div class="setup-header">
+    <img id="setup-logo" src="logo.png" alt="Sim SD">
+    <div class="setup-header-text">
+      <h1 id="setup-title">Configurar Comitê</h1>
+      <p id="setup-theme">Configure sua sessão antes de começar</p>
+    </div>
+    <button class="btn-back-committee" onclick="backToCommittee()"><span class="material-icons">arrow_back</span>Trocar comitê</button>
+  </div>
+
+  <div class="setup-body">
+    <!-- Session info -->
+    <div class="setup-card">
+      <div class="setup-card-title"><span class="material-icons inline-icon">assignment</span>Informações da Sessão</div>
+      <div class="setup-form-row">
+        <div class="setup-field">
+          <label>Nome da Conferência</label>
+          <input class="setup-inp" id="s-conf" value="SimSD 2026" placeholder="ex: SimSD 2026">
+        </div>
+        <div class="setup-field">
+          <label>Comitê</label>
+          <input class="setup-inp" id="s-committee" value="CSNU" placeholder="ex: CSNU">
+        </div>
+        <div class="setup-field">
+          <label>Sessão</label>
+          <input class="setup-inp" id="s-session" value="1ª Sessão" placeholder="ex: 1ª Sessão">
+        </div>
+        <div class="setup-field" style="max-width:130px">
+          <label>Tempo por Orador (seg)</label>
+          <input class="setup-inp" id="s-time" type="number" value="60" min="10" max="600">
+        </div>
+        <div class="setup-field" style="max-width:130px">
+          <label>Aviso (seg restantes)</label>
+          <input class="setup-inp" id="s-warn" type="number" value="15" min="5" max="120">
+        </div>
+      </div>
+    </div>
+
+    <!-- Participant selection (countries OR camara) -->
+    <div class="setup-card" style="flex:1">
+      <div class="setup-card-title" id="selection-title"><span class="material-icons inline-icon">public</span>Países do Comitê</div>
+
+      <!-- Region filter (only for ONU committees) -->
+      <div class="region-pills" id="region-pills">
+        <span style="font-size:11px;font-weight:700;color:var(--muted);margin-right:2px">Região:</span>
+        <div class="rpill on" onclick="filterRegion('all',this)">Todos</div>
+        <div class="rpill" onclick="filterRegion('africa',this)"><span class="material-icons inline-icon">public</span>África</div>
+        <div class="rpill" onclick="filterRegion('americas',this)"><span class="material-icons inline-icon">public</span>Américas</div>
+        <div class="rpill" onclick="filterRegion('asia',this)"><span class="material-icons inline-icon">public</span>Ásia &amp; Oceania</div>
+        <div class="rpill" onclick="filterRegion('europe',this)"><span class="material-icons inline-icon">public</span>Europa</div>
+        <div class="rpill" onclick="filterRegion('mideast',this)"><span class="material-icons inline-icon">public</span>Oriente Médio</div>
+      </div>
+
+      <!-- Search + count -->
+      <div class="country-search-row">
+        <input class="cs-inp" id="country-search" placeholder="Buscar..." oninput="renderCountryGrid()">
+        <span class="sel-count">Selecionados: <strong id="sel-count">0</strong> de <span id="total-countries">193</span></span>
+      </div>
+
+      <!-- Grid -->
+      <div class="country-grid" id="country-grid"></div>
+
+      <!-- Actions -->
+      <div class="setup-chips-row" id="setup-chips">
+        <button class="chip-btn" onclick="selectVisible()">Selecionar visíveis</button>
+        <button class="chip-btn" onclick="deselectAll()">Limpar tudo</button>
+        <button class="chip-btn" id="chip-all" onclick="selectALL193()">Selecionar todos</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="setup-footer">
+    <span class="setup-footer-note" id="setup-note">Selecione pelo menos 1 participante para começar</span>
+    <button class="btn-start" id="btn-start-session" onclick="startSession()" disabled>
+      Iniciar Sessão →
+    </button>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════
+     APP SCREEN
+════════════════════════════════════════ -->
+<div id="app-screen">
+
+  <!-- CONFIG PANEL (inline) -->
+  <div class="ipanel" id="cfg-panel">
+    <div class="ipanel-header">
+      <span class="ipanel-title">Configurações</span>
+      <button class="ipanel-close material-icons" onclick="closePanel('cfg-panel')">close</button>
+    </div>
+    <div class="ip-row">
+      <div class="ip-field"><label>Conferência</label><input class="ip-inp" id="c-conf"></div>
+      <div class="ip-field"><label>Comitê</label><input class="ip-inp" id="c-committee"></div>
+    </div>
+    <div class="ip-row">
+      <div class="ip-field"><label>Sessão</label><input class="ip-inp" id="c-session"></div>
+      <div class="ip-field"><label>Tempo padrão (seg)</label><input class="ip-inp" type="number" id="c-time" min="10" max="600"></div>
+      <div class="ip-field"><label>Aviso (seg)</label><input class="ip-inp" type="number" id="c-warn" min="5" max="120"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:.375rem">
+      <button class="btn-primary" onclick="saveConfig()">Salvar</button>
+      <button class="btn-secondary" onclick="closePanel('cfg-panel')">Cancelar</button>
+      <button class="btn-secondary" style="margin-left:auto" onclick="goSetup()"><span class="material-icons inline-icon">arrow_back</span>Reconfigurar Comitê</button>
+    </div>
+    <div style="border-top:1px solid var(--border);margin-top:.875rem;padding-top:.875rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:.5rem">Relatório da Sessão</div>
+      <button class="btn-report" onclick="generateReport()"><span class="material-icons inline-icon">picture_as_pdf</span>Gerar Relatório Completo (PDF)</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Gera um documento com oradores, cessões de fala, tempos, votações e presença. Use "Salvar como PDF" na janela de impressão.</div>
+      <button class="btn-report" style="margin-top:.625rem" onclick="exportSessionJSON()"><span class="material-icons inline-icon">download</span>Exportar Sessão (JSON)</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Exporta todos os dados brutos da sessão (oradores, presença, moções, histórico, votos) em formato JSON.</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin-top:.875rem;padding-top:.875rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:.5rem">Encerramento</div>
+      <button class="btn-report" style="background:var(--green,#3a6b1a);color:#fff;border-color:var(--green,#3a6b1a)" onclick="encerrarSessao()"><span class="material-icons inline-icon">power_settings_new</span>Encerrar a Sessão</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Encerra a sessão atual e gera o relatório completo. A ordem dos discursos é registrada — ao abrir uma nova sessão deste mesmo comitê, você poderá continuar de onde parou.</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin-top:.875rem;padding-top:.875rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:.5rem">Zona de Perigo</div>
+      <button class="btn-reset-all" onclick="resetSession()"><span class="material-icons inline-icon">restart_alt</span>Resetar Sessão (apagar tudo)</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Apaga oradores, presença, moções, votos e histórico, e retorna à tela de configuração inicial.</div>
+    </div>
+  </div>
+
+  <!-- VOTE SETUP PANEL -->
+  <div class="ipanel" id="vote-panel">
+    <div class="ipanel-header">
+      <span class="ipanel-title">Configurar Votação</span>
+      <button class="ipanel-close material-icons" onclick="closePanel('vote-panel')">close</button>
+    </div>
+    <div class="ip-section">Tipo de Votação</div>
+    <div class="radio-grid" id="vt-type">
+      <div class="ropt on" onclick="pickR('vt-type',this,'procedimental')"><div class="rdot"></div>Procedimental</div>
+      <div class="ropt" onclick="pickR('vt-type',this,'substancial')"><div class="rdot"></div>Substancial</div>
+    </div>
+    <div class="ip-section">Maioria Requerida</div>
+    <div class="radio-grid" id="vt-maj">
+      <div class="ropt on" onclick="pickR('vt-maj',this,'simples')"><div class="rdot"></div>Maioria Simples</div>
+      <div class="ropt" onclick="pickR('vt-maj',this,'qualificada')"><div class="rdot"></div>Maioria Qualificada</div>
+      <div class="ropt" onclick="pickR('vt-maj',this,'csnu')"><div class="rdot"></div>Conselho de Segurança (9)</div>
+      <div class="ropt" onclick="pickR('vt-maj',this,'consenso')"><div class="rdot"></div>Votação por Consenso</div>
+    </div>
+    <button class="btn-enviar" onclick="startVote()">ENVIAR</button>
+  </div>
+
+  <!-- CAUCUS SETTINGS -->
+  <div class="ipanel" id="caucus-panel">
+    <div class="ipanel-header">
+      <span class="ipanel-title" id="caucus-panel-title">Configurar Sessão</span>
+      <button class="ipanel-close material-icons" onclick="closePanel('caucus-panel')">close</button>
+    </div>
+    <div class="ip-row">
+      <div class="ip-field"><label>Duração Total (min)</label><input class="ip-inp" id="cau-total" type="number" value="15" min="1" max="120"></div>
+      <div class="ip-field"><label>Tempo por Orador (seg)</label><input class="ip-inp" id="cau-spk" type="number" value="60" min="10" max="600"></div>
+    </div>
+    <button class="btn-enviar" onclick="applyCaucus()">Aplicar</button>
+  </div>
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <img id="app-logo" class="topbar-logo" src="logo.png" onclick="goSetup()" title="Voltar ao setup">
+    <div class="topbar-sep"></div>
+    <span id="tb-committee" class="topbar-committee" onclick="inlineEdit('committee')" title="Clique para editar"></span>
+    <input id="tb-committee-inp" class="topbar-inline-inp" type="text" style="display:none"
+      onblur="saveInline('committee')" onkeydown="if(event.key==='Enter')saveInline('committee')">
+    <span class="session-badge" id="tb-session" onclick="inlineEdit('session')" title="Clique para editar"></span>
+    <input id="tb-session-inp" class="topbar-inline-inp" type="text" style="display:none;width:140px"
+      onblur="saveInline('session')" onkeydown="if(event.key==='Enter')saveInline('session')">
+    <span class="status-pill" id="status-pill">Lista de Discursos</span>
+    <div class="topbar-right">
+      <div class="official-clock" title="Horário oficial">
+        <span class="material-icons clock-icon" style="font-size:15px;">schedule</span>
+        <span id="official-clock-time">--:--:--</span>
+      </div>
+      <div class="majority-bar">
+        <div class="mb-item"><div class="mb-lbl">MS</div><div class="mb-num" id="mb-ms">—</div></div>
+        <div class="mb-sep"></div>
+        <div class="mb-item"><div class="mb-lbl">MQ</div><div class="mb-num" id="mb-mq">—</div></div>
+        <div class="mb-sep"></div>
+        <div class="mb-item"><div class="mb-lbl">Pres.</div><div class="mb-num" id="mb-tot">0</div></div>
+      </div>
+      <button class="btn-cfg" onclick="openCfg()"><span class="material-icons inline-icon">settings</span>Config</button>
+    </div>
+  </header>
+
+  <!-- AGENDA BAR -->
+  <div class="agenda-bar">
+    <span id="agenda-txt" class="agenda-txt" onclick="inlineEdit('agenda')" title="Clique para editar"></span>
+    <input id="agenda-inp" class="agenda-inline-inp" type="text" style="display:none"
+      onblur="saveInline('agenda')" onkeydown="if(event.key==='Enter')saveInline('agenda')">
+  </div>
+
+  <!-- BODY -->
+  <div class="app-body">
+    <div class="center">
+
+      <!-- ══ TAB: GSL ══ -->
+      <div class="tab-pane active" id="tab-gsl">
+        <div class="gsl-grid">
+          <!-- LEFT COLUMN: timer + current speaker + history -->
+          <div class="gsl-col-left">
+            <!-- Timer card -->
+            <div class="card timer-card-box">
+              <div class="timer-display" id="gsl-timer">1:00</div>
+              <div class="timer-progress"><div class="timer-bar" id="gsl-bar" style="width:100%"></div></div>
+              <div class="ctrl-row">
+                <button class="cbtn cb-play material-icons" id="btn-gsl-pp" onclick="gslPP()" title="Play/Pause (Espaço)">play_arrow</button>
+                <button class="cbtn cb-cfg material-icons"  onclick="openCfg()"             title="Configurações">settings</button>
+                <button class="cbtn cb-reset material-icons" onclick="gslReset()"           title="Resetar">replay</button>
+                <button class="cbtn cb-stop material-icons" onclick="gslStop()"             title="Parar">stop</button>
+              </div>
+              <div class="presets">
+                <span style="font-size:11px;color:var(--muted)">Tempo:</span>
+                <div class="pchip" onclick="gslPreset(30,this)">0:30</div>
+                <div class="pchip on" onclick="gslPreset(60,this)">1:00</div>
+                <div class="pchip" onclick="gslPreset(90,this)">1:30</div>
+                <div class="pchip" onclick="gslPreset(120,this)">2:00</div>
+                <div class="pchip" onclick="gslPreset(180,this)">3:00</div>
+                <div class="custom-t">
+                  <input class="ct-inp" id="ct-sec" type="number" min="5" max="999" placeholder="seg">
+                  <button class="ct-ok" onclick="gslCustom()">OK</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Current speaker -->
+            <div class="card">
+              <div class="sec-head">
+                <span class="sec-title">Orador Atual</span>
+                <button class="btn-yield" onclick="toggleYield()" title="Ceder o discurso">Ceder ⇒</button>
+                <button class="btn-next" onclick="gslNext()" style="margin-left:8px">Próximo Orador</button>
+              </div>
+              <div class="cur-row" id="gsl-cur-row">
+                <span class="cur-flag material-icons" id="gsl-cur-flag" style="font-size:26px;">account_balance</span>
+                <div>
+                  <div class="cur-name" id="gsl-cur-name">Nenhum orador</div>
+                  <div class="cur-meta" id="gsl-cur-meta"></div>
+                </div>
+              </div>
+              <!-- Yield options (inline, expand under speaker) -->
+              <div class="yield-box" id="yield-box" style="display:none">
+                <div class="yield-title">Ceder o discurso a:</div>
+                <div class="yield-options">
+                  <button class="yield-opt yield-chair" onclick="yieldToChair()"><span class="material-icons inline-icon">reply</span>Ceder ao Chair (encerrar)</button>
+                  <div class="yield-to-country">
+                    <select class="m-inp" id="yield-country-sel" style="flex:1"><option value="">Selecione o país...</option></select>
+                    <button class="yield-opt yield-go" onclick="yieldToCountry()">Ceder <span class="material-icons inline-icon">arrow_forward</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Speaker history -->
+            <div class="card">
+              <div class="sec-head">
+                <span class="sec-title">Histórico de Oradores</span>
+                <button style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--muted);font-family:Candara,Calibri,sans-serif" onclick="clearHistory()">Limpar</button>
+              </div>
+              <div class="history-list-wrap" id="history-list">
+                <div class="empty" style="padding:.75rem"><div class="empty-txt">Nenhum discurso ainda</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: vertical speakers frame -->
+          <div class="gsl-col-right">
+            <div class="card speakers-frame">
+              <div class="sec-head">
+                <span class="sec-title">
+                  Próximos Oradores
+                  <span id="queue-badge" style="font-size:10px;background:var(--red);color:white;padding:1px 7px;border-radius:10px;margin-left:5px">0</span>
+                </span>
+              </div>
+              <div class="speakers-list-wrap" id="gsl-list">
+                <div class="empty"><div class="empty-icon material-icons">reorder</div><div class="empty-txt" id="empty-add-txt">Clique à direita para adicionar</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: Moções ══ -->
+      <div class="tab-pane" id="tab-motions">
+        <div class="tab-scroll">
+          <div class="mo-form">
+            <div class="mo-form-title">Nova Moção</div>
+            <div class="mo-row">
+              <div class="mf" style="flex:1.3"><label>Tipo</label>
+                <select class="m-inp" id="mo-type">
+                  <option value="unmod">Sessão Não-Moderada</option>
+                  <option value="mod">Sessão Moderada</option>
+                  <option value="vote">Votação de Documento</option>
+                  <option value="recess">Recesso</option>
+                  <option value="other">Outra</option>
+                </select>
+              </div>
+              <div class="mf" style="flex:1.2"><label>Proponente</label>
+                <select class="m-inp" id="mo-prop"><option value="">País...</option></select>
+              </div>
+              <div class="mf" style="flex:.65"><label>Duração (min)</label><input class="m-inp" type="number" id="mo-dur" placeholder="ex: 10"></div>
+              <div class="mf" style="flex:.65"><label>Tempo/Orador (s)</label><input class="m-inp" type="number" id="mo-spk" placeholder="ex: 60"></div>
+              <div class="mf" style="flex:0;justify-content:flex-end"><label>&nbsp;</label><button class="btn-add-mo" onclick="addMotion()"><span class="material-icons inline-icon">add</span>Adicionar</button></div>
+            </div>
+          </div>
+          <div class="mo-list" id="mo-list">
+            <div class="empty" id="mo-empty"><div class="empty-icon material-icons">layers_clear</div><div class="empty-txt">Nenhuma moção</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: Moderado ══ -->
+      <div class="tab-pane" id="tab-mod">
+        <div class="timer-frame">
+          <div class="caucus-sub" id="mod-total-d">15:00 / 15:00</div>
+          <div class="caucus-main" id="mod-spk-d">1:00 / 1:00</div>
+          <div class="ctrl-row">
+            <button class="cbtn cb-play material-icons" id="btn-mod-pp" onclick="modPP()">play_arrow</button>
+            <button class="cbtn cb-cfg material-icons" onclick="openCaucus('mod')">settings</button>
+            <button class="cbtn cb-reset material-icons" onclick="modReset()">replay</button>
+            <button class="cbtn cb-stop material-icons" onclick="modNext()">skip_next</button>
+          </div>
+        </div>
+        <div class="tab-scroll">
+          <div class="card">
+            <div class="sec-head">
+              <span class="sec-title">Orador Atual</span>
+              <button class="btn-next" onclick="modNext()">Próximo Orador</button>
+            </div>
+            <div class="cur-row">
+              <span class="cur-flag material-icons" id="mod-cur-flag" style="font-size:26px;">public</span>
+              <div><div class="cur-name" id="mod-cur-name">Adicionar oradores à direita</div></div>
+            </div>
+          </div>
+          <div class="card" style="flex:1;display:flex;flex-direction:column;gap:.5rem">
+            <div class="sec-head"><span class="sec-title">Próximos Oradores</span></div>
+            <div class="speakers-list-wrap" id="mod-list">
+              <div class="empty"><div class="empty-icon material-icons">reorder</div><div class="empty-txt">Lista vazia</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: Não Moderado ══ -->
+      <div class="tab-pane" id="tab-unmod">
+        <div class="timer-frame" style="text-align:center">
+          <div class="caucus-main" id="unmod-d" style="font-size:80px">10:00 / 10:00</div>
+          <div class="ctrl-row">
+            <button class="cbtn cb-play material-icons" id="btn-unmod-pp" onclick="unmodPP()">play_arrow</button>
+            <button class="cbtn cb-cfg material-icons" onclick="openCaucus('unmod')">settings</button>
+            <button class="cbtn cb-reset material-icons" onclick="unmodReset()">replay</button>
+            <button class="cbtn cb-stop material-icons" onclick="unmodReset()">stop</button>
+          </div>
+        </div>
+        <div class="tab-scroll"></div>
+      </div>
+
+      <!-- ══ TAB: Orador Único ══ -->
+      <div class="tab-pane" id="tab-solo">
+        <div class="timer-frame">
+          <div class="timer-display" id="solo-timer" style="font-size:68px">1:00</div>
+          <div class="timer-progress"><div class="timer-bar" id="solo-bar" style="width:100%"></div></div>
+          <div class="ctrl-row" style="grid-template-columns:1fr 1fr">
+            <button class="cbtn cb-play material-icons" id="btn-solo-pp" onclick="soloPP()">play_arrow</button>
+            <button class="cbtn cb-reset material-icons" onclick="soloReset()">replay</button>
+          </div>
+        </div>
+        <div class="tab-scroll">
+          <div class="card">
+            <div class="sec-head"><span class="sec-title">Selecionar Orador Único</span></div>
+            <select class="m-inp" id="solo-sel" style="width:100%;margin-bottom:.75rem"><option value="">Selecione o país...</option></select>
+            <div id="solo-cur-row" style="display:none">
+              <div class="cur-row">
+                <span class="cur-flag material-icons" id="solo-flag" style="font-size:26px;">flag</span>
+                <div><div class="cur-name" id="solo-name">—</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: Voto ══ -->
+      <div class="tab-pane" id="tab-vote">
+        <div class="tab-scroll" style="flex-direction:row;gap:.875rem;overflow:hidden;padding:.875rem">
+          <div class="vote-ctrl" style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:700;color:var(--red)">Painel de Controle</div>
+            <input class="ip-inp" id="vote-label" placeholder="Assunto da votação (ex: DR/1/BRA)" style="width:100%">
+            <div style="display:flex;gap:7px">
+              <button class="cbtn cb-cfg" style="flex:1;height:38px;font-size:13px" onclick="openPanel('vote-panel')"><span class="material-icons inline-icon">settings</span>Config</button>
+              <button class="cbtn cb-reset" style="flex:1;height:38px;font-size:13px" onclick="resetVote()"><span class="material-icons inline-icon">replay</span>Reset</button>
+            </div>
+            <div class="vstats" id="vstats">
+              <div class="vs"><div class="vs-num" id="v-fav" style="color:var(--green)">0</div><div class="vs-lbl">A Favor</div></div>
+              <div class="vs"><div class="vs-num" id="v-fdr" style="color:#0a5c28">0</div><div class="vs-lbl">Fav.+Dir.</div></div>
+              <div class="vs"><div class="vs-num" id="v-con" style="color:var(--red)">0</div><div class="vs-lbl">Contra</div></div>
+              <div class="vs"><div class="vs-num" id="v-cdr" style="color:#6b0000">0</div><div class="vs-lbl">Con.+Dir.</div></div>
+              <div class="vs"><div class="vs-num" id="v-abs" style="color:var(--muted)">0</div><div class="vs-lbl">Abstenção</div></div>
+              <div class="vs"><div class="vs-num" id="v-maj" style="color:var(--gold)">—</div><div class="vs-lbl">Maioria</div></div>
+            </div>
+            <div class="vote-res-bar"><div class="vote-res-fill" id="v-fill" style="width:0%"></div></div>
+            <div class="vote-res-txt" id="v-res" style="color:var(--muted)">—</div>
+            <button class="btn-report" onclick="registerVote()" style="margin-top:.25rem"><span class="material-icons inline-icon">how_to_vote</span>Registrar Votação no Histórico</button>
+          </div>
+          <div class="vote-panel" style="flex:1.8;min-width:0">
+            <div style="font-size:14px;font-weight:700;color:var(--red);margin-bottom:.625rem" id="vote-type-lbl">Votação Procedimental</div>
+            <div class="vlist" id="vlist"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: Presença ══ -->
+      <div class="tab-pane" id="tab-presence">
+        <div style="flex-shrink:0;padding:.875rem .875rem 0">
+          <div class="pres-summary">
+            <div class="pstat"><div class="pstat-num" id="ps-tot">0</div><div class="pstat-lbl">Total</div></div>
+            <div class="pstat"><div class="pstat-num g" id="ps-pres">0</div><div class="pstat-lbl">Presentes</div></div>
+            <div class="pstat"><div class="pstat-num o" id="ps-vot">0</div><div class="pstat-lbl">Pres. Votantes</div></div>
+            <div class="pstat"><div class="pstat-num r" id="ps-aus">0</div><div class="pstat-lbl">Ausentes</div></div>
+            <div class="quorum-box">
+              <div class="ql">Maioria Simples: <strong id="q-ms">—</strong></div>
+              <div class="ql">Maioria Qualificada: <strong id="q-mq">—</strong></div>
+            </div>
+            <div class="pres-actions">
+              <button class="btn-pres" onclick="setAll('presente')">Todos Presentes</button>
+              <button class="btn-pres" onclick="setAll('presente-votante')">Todos Votantes</button>
+              <button class="btn-pres" onclick="setAll('ausente')">Todos Ausentes</button>
+              <button class="btn-pres" onclick="exportCSV()">↓ CSV</button>
+              <button class="btn-pres btn-pres-done" onclick="concluirPresenca()"><span class="material-icons inline-icon">check_circle</span>Concluir Presença</button>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:0 .875rem .875rem;min-height:0">
+          <div class="pres-card">
+            <table class="ptable">
+              <thead id="pres-thead"><tr><th></th><th>País</th><th>Delegado</th><th>Status</th></tr></thead>
+              <tbody id="pres-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /center -->
+
+    <!-- RIGHT PANEL -->
+    <div class="right-panel" id="right-panel">
+      <div class="rp-header" id="rp-header">Acrescentar Orador</div>
+      <div class="rp-search-wrap">
+        <input class="rp-search" id="rp-search" placeholder="Buscar..." oninput="renderRP()">
+      </div>
+      <div class="rp-list" id="rp-list"></div>
+    </div>
+
+  </div><!-- /app-body -->
+
+  <!-- BOTTOM TABS -->
+  <nav class="bottom-tabs">
+    <button class="tb on" id="tb-gsl"      onclick="switchTab('gsl')">     <span class="material-icons tb-icon">forum</span>Lista de Discursos</button>
+    <button class="tb" id="tb-motions"     onclick="switchTab('motions')"> <span class="material-icons tb-icon">gavel</span>Moções</button>
+    <button class="tb" id="tb-mod"         onclick="switchTab('mod')">     <span class="material-icons tb-icon">chat</span>Moderado</button>
+    <button class="tb" id="tb-unmod"       onclick="switchTab('unmod')">   <span class="material-icons tb-icon">chat_bubble_outline</span>Não Moderado</button>
+    <button class="tb" id="tb-solo"        onclick="switchTab('solo')">    <span class="material-icons tb-icon">mic</span>Orador Único</button>
+    <button class="tb" id="tb-vote"        onclick="switchTab('vote')">    <span class="material-icons tb-icon">how_to_vote</span>Voto</button>
+    <button class="tb" id="tb-presence"    onclick="switchTab('presence')"><span class="material-icons tb-icon">fact_check</span>Presença</button>
+  </nav>
+
+</div><!-- /app-screen -->
+
+
+<script src="script.js"></script>
+</body>
+</html>
