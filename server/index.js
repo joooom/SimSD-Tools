@@ -153,11 +153,17 @@ async function handleApi(req, res, url) {
   const user = requireUser(req);
   if (url.pathname === '/api/rooms' && method === 'GET') return sendJson(res, 200, { rooms: listRooms(user) });
   if (url.pathname === '/api/rooms' && method === 'POST') {
+    if (user.role === 'student') {
+      throw Object.assign(new Error('Estudantes não têm permissão para criar salas.'), { status: 403 });
+    }
     const body = await readJson(req);
     const name = String(body.name || '').trim().slice(0, 120);
     if (!name) throw Object.assign(new Error('Informe o nome da sala.'), { status: 400 });
+    const rawCommittee = String(body.committeeKey || '').trim().toLowerCase();
+    const validCommittees = ['camara', 'unodc', 'oea', 'unesco'];
+    const committeeKey = validCommittees.includes(rawCommittee) ? rawCommittee : (rawCommittee.slice(0, 40) || null);
     const now = nowIso();
-    const room = { id: randomUUID(), code: generateRoomCode(), name, committeeKey: String(body.committeeKey || '').slice(0, 40) || null };
+    const room = { id: randomUUID(), code: generateRoomCode(), name, committeeKey };
     db.prepare(`INSERT INTO rooms(id,code,name,committee_key,owner_user_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?)`)
       .run(room.id, room.code, room.name, room.committeeKey, user.id, now, now);
     db.prepare('INSERT OR IGNORE INTO room_members(room_id,user_id,added_by,created_at) VALUES(?,?,?,?)')
@@ -185,6 +191,7 @@ async function handleApi(req, res, url) {
       if (!canManageRoom(room, user)) throw Object.assign(new Error('Apenas o criador ou um admin pode adicionar pessoas.'), { status: 403 });
       const body = await readJson(req);
       const identifier = String(body.identifier || '').trim();
+      if (!identifier) throw Object.assign(new Error('Informe um identificador de usuário válido.'), { status: 400 });
       const member = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(login)=lower(?) OR portal_id=?').get(identifier, identifier, identifier);
       if (!member) throw Object.assign(new Error('Usuário ainda não autenticou neste app.'), { status: 404 });
       db.prepare('INSERT OR IGNORE INTO room_members(room_id,user_id,added_by,created_at) VALUES(?,?,?,?)')
@@ -205,10 +212,28 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === '/api/users/search' && method === 'GET') {
-    const query = `%${String(url.searchParams.get('q') || '').slice(0, 80)}%`;
-    const users = db.prepare('SELECT * FROM users WHERE name LIKE ? OR email LIKE ? OR login LIKE ? ORDER BY name LIMIT 20')
+    if (user.role === 'student') throw Object.assign(new Error('Acesso não autorizado à busca de usuários.'), { status: 403 });
+    const rawQuery = String(url.searchParams.get('q') || '').trim().slice(0, 80);
+    if (!rawQuery) return sendJson(res, 200, { users: [] });
+    const escaped = rawQuery.replace(/[%_\\]/g, '\\$&');
+    const query = `%${escaped}%`;
+    const users = db.prepare("SELECT * FROM users WHERE (name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR login LIKE ? ESCAPE '\\') ORDER BY name LIMIT 20")
       .all(query, query, query).map(publicUser);
     return sendJson(res, 200, { users });
+  }
+
+  const adminRoomMatch = url.pathname.match(/^\/api\/admin\/rooms\/([^/]+)$/);
+  if (adminRoomMatch && method === 'DELETE') {
+    requireAdmin(req);
+    const room = roomById(adminRoomMatch[1]);
+    if (!room) throw Object.assign(new Error('Sala não encontrada.'), { status: 404 });
+    db.prepare('DELETE FROM rooms WHERE id=?').run(room.id);
+    broadcast(room.id, { type: 'room:deleted' });
+    if (socketsByRoom.has(room.id)) {
+      for (const socket of socketsByRoom.get(room.id)) socket.close();
+      socketsByRoom.delete(room.id);
+    }
+    return sendJson(res, 200, { ok: true });
   }
 
   if (url.pathname === '/api/admin/rooms' && method === 'GET') {
@@ -251,7 +276,7 @@ function serveStatic(res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === '/') pathname = '/index.html';
   const safePath = normalize(pathname).replace(/^([/\\])+/, '');
-  let filePath = join(DIST_DIR, safePath);
+  let filePath = resolve(DIST_DIR, safePath);
   if (!filePath.startsWith(DIST_DIR) || !existsSync(filePath) || statSync(filePath).isDirectory()) filePath = join(DIST_DIR, 'index.html');
   if (!existsSync(filePath)) throw Object.assign(new Error('Build não encontrado. Execute npm run build.'), { status: 503 });
   res.writeHead(200, { 'Content-Type': contentTypes[extname(filePath)] || 'application/octet-stream' });

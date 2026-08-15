@@ -1015,17 +1015,24 @@ function registerVote(){
 
 // Build the printable report used both by the chair and by the admin panel.
 function buildReportHTML(options={}){
+  const esc = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;');
+
   const isPartial=options.type==='partial';
   const cc=S.committeeCountries;
   const now=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
   const presLabel={presente:'Presente','presente-votante':'Presente e Votante',ausente:'Ausente'};
   const voteLabel={fav:'A Favor',fdr:'A Favor c/ Direito',con:'Contra',cdr:'Contra c/ Direito',abs:'Abstenção'};
   const TR=isCamaraCte()?'Representação':'País'; const TRs=isCamaraCte()?'Representações':'Países';
-  const nm=(code)=>dispName(code);
+  const nm=(code)=>esc(dispName(code));
   const flag=(name,f,iso)=>{
-    if(window.SimSDOfflineMode)return f?`<span style="margin-right:5px">${f}</span>`:'';
+    if(window.SimSDOfflineMode)return f?`<span style="margin-right:5px">${esc(f)}</span>`:'';
     const code=iso||isoOf(name)||'';
-    return code?`<img src="https://flagcdn.com/h20/${code}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';
+    return code?`<img src="https://flagcdn.com/h20/${encodeURIComponent(code)}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';
   };
 
   // Presence counts
@@ -1057,30 +1064,30 @@ function buildReportHTML(options={}){
   // History (chronological — reverse since stored newest-first)
   const histRows=[...S.history].reverse().map(h=>{
     const obsArr=[];
-    if(h.received)obsArr.push(`Recebeu de ${h.received}`);
+    if(h.received)obsArr.push(`Recebeu de ${esc(h.received)}`);
     if(h.yielded==='chair')obsArr.push('Cedeu ao Chair');
-    else if(h.yielded)obsArr.push(`Cedeu a ${h.yielded}`);
+    else if(h.yielded)obsArr.push(`Cedeu a ${esc(h.yielded)}`);
     const obs=obsArr.length?obsArr.join(' · '):'—';
-    return `<tr><td>${h.t}</td><td>${flag(h.c,h.f)}${nm(h.c)}</td><td style="text-align:center">${fmt(h.sec)}</td><td>${obs}</td></tr>`;
+    return `<tr><td>${esc(h.t)}</td><td>${flag(h.c,h.f)}${nm(h.c)}</td><td style="text-align:center">${fmt(h.sec)}</td><td>${obs}</td></tr>`;
   }).join('');
 
   // Motions
   const ML2={unmod:'Sessão Não-Moderada',mod:'Sessão Moderada',vote:'Votação de Documento',recess:'Recesso',other:'Outra'};
-  const motionRows=S.motions.map(m=>`<tr><td>${m.ts}</td><td>${ML2[m.type]||m.type}</td><td>${flag(m.prop)}${nm(m.prop)}</td><td>${[m.dur?m.dur+' min':'',m.spk?m.spk+'s/orador':''].filter(Boolean).join(' · ')||'—'}</td><td>${m.status==='approved'?'✓ Aprovada':m.status==='rejected'?'✕ Rejeitada':'Pendente'}</td></tr>`).join('');
+  const motionRows=S.motions.map(m=>`<tr><td>${esc(m.ts)}</td><td>${esc(ML2[m.type]||m.type)}</td><td>${flag(m.prop)}${nm(m.prop)}</td><td>${[m.dur?esc(m.dur)+' min':'',m.spk?esc(m.spk)+'s/orador':''].filter(Boolean).join(' · ')||'—'}</td><td>${m.status==='approved'?'✓ Aprovada':m.status==='rejected'?'✕ Rejeitada':'Pendente'}</td></tr>`).join('');
 
   // Votes
   const voteBlocks=S.voteHistory.length? [...S.voteHistory].reverse().map(v=>{
-    const t=v.tally;
-    const detailRows=v.detail.map(d=>`<tr><td>${flag(d.c,d.f)}${nm(d.c)}</td><td>${voteLabel[d.v]||d.v}</td></tr>`).join('');
+    const t=v.tally || { fav: 0, fdr: 0, con: 0, cdr: 0, abs: 0 };
+    const detailRows=(v.detail||[]).map(d=>`<tr><td>${flag(d.c,d.f)}${nm(d.c)}</td><td>${esc(voteLabel[d.v]||d.v)}</td></tr>`).join('');
     return `<div class="vote-block">
-      <h3>${v.label} <span class="vtag ${v.approved?'ok':'no'}">${v.approved?'APROVADA':'NÃO APROVADA'}</span></h3>
-      <p class="vmeta">${v.t} · ${v.type==='procedimental'?'Procedimental':'Substancial'} · Maioria ${v.majority} (necessário: ${v.maj})</p>
-      <p class="vtotals">A Favor: <b>${t.fav}</b> · A Favor c/ Direito: <b>${t.fdr}</b> · Contra: <b>${t.con}</b> · Contra c/ Direito: <b>${t.cdr}</b> · Abstenções: <b>${t.abs}</b></p>
+      <h3>${esc(v.label)} <span class="vtag ${v.approved?'ok':'no'}">${v.approved?'APROVADA':'NÃO APROVADA'}</span></h3>
+      <p class="vmeta">${esc(v.t)} · ${v.type==='procedimental'?'Procedimental':'Substancial'} · Maioria ${esc(v.majority)} (necessário: ${Number(v.maj)||0})</p>
+      <p class="vtotals">A Favor: <b>${Number(t.fav)||0}</b> · A Favor c/ Direito: <b>${Number(t.fdr)||0}</b> · Contra: <b>${Number(t.con)||0}</b> · Contra c/ Direito: <b>${Number(t.cdr)||0}</b> · Abstenções: <b>${Number(t.abs)||0}</b></p>
       <table class="rtable"><thead><tr><th>${TR}</th><th>Voto</th></tr></thead><tbody>${detailRows}</tbody></table>
     </div>`;
   }).join('') : '<p class="empty-note">Nenhuma votação registrada nesta sessão.</p>';
 
-  const presenceRows=cc.map(c=>`<tr><td>${flag(c.c,c.f,c.i)}${nm(c.c)}${c.sub?' <span style=\'color:#9c958e;font-style:italic\'>('+c.sub+')</span>':''}</td><td>${presLabel[S.presence[c.c]]||'Ausente'}</td><td style="text-align:center">${S.speeches[c.c]||0}</td></tr>`).join('');
+  const presenceRows=cc.map(c=>`<tr><td>${flag(c.c,c.f,c.i)}${nm(c.c)}${c.sub?' <span style=\'color:#9c958e;font-style:italic\'>('+esc(c.sub)+')</span>':''}</td><td>${esc(presLabel[S.presence[c.c]]||'Ausente')}</td><td style="text-align:center">${Number(S.speeches[c.c])||0}</td></tr>`).join('');
 
   // Pending speakers list (the GSL queue at moment of report generation)
   const pendingSpeakers=S.speakers.length ? S.speakers.map((s,idx)=>{
@@ -1092,16 +1099,10 @@ function buildReportHTML(options={}){
     return `<tr style="${rowStyle}"><td style="text-align:center;color:#9c958e">${pos}º</td><td>${marker}${flag(s.c,s.f,s.i)}${nm(s.c)}${note}</td></tr>`;
   }).join('') : '';
 
-  const escapeHtmlAttr=(v)=>String(v??'')
-    .replace(/&/g,'&amp;')
-    .replace(/"/g,'&quot;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/'/g,'&#39;');
-  const appLogoSrc=escapeHtmlAttr((document.getElementById('app-logo')||{}).src||'');
+  const appLogoSrc=esc((document.getElementById('app-logo')||{}).src||'');
 
   const reportHTML=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>${isPartial?'Relatório parcial':'Relatório'} — ${S.config.committee} — ${S.config.session}</title>
+<title>${isPartial?'Relatório parcial':'Relatório'} — ${esc(S.config.committee)} — ${esc(S.config.session)}</title>
 <style>
   @page { margin: 1.5cm; }
   * { box-sizing: border-box; }
@@ -1138,9 +1139,9 @@ function buildReportHTML(options={}){
   <div class="rhead">
     <img src="${appLogoSrc}" style="height:56px">
     <div>
-      <h1>${S.config.conference} — ${S.config.committee}</h1>
-      <p>${S.config.session} · Relatório gerado em ${now}</p>
-      <p>Agenda: ${S.agenda}</p>
+      <h1>${esc(S.config.conference)} — ${esc(S.config.committee)}</h1>
+      <p>${esc(S.config.session)} · Relatório gerado em ${now}</p>
+      <p>Agenda: ${esc(S.agenda)}</p>
       ${isPartial?'<span class="live-note">Relatório parcial · atualização automática</span>':''}
     </div>
   </div>

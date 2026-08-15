@@ -47,6 +47,15 @@ function AdminDashboard({ onClose }) {
   const [error, setError] = useState('');
   const liveReportTimers = useRef(new Set());
   const load = useCallback(() => api('/api/admin/rooms').then(data => setRooms(data.rooms)).catch(err => setError(err.message)), []);
+  const deleteRoom = async (room) => {
+    if (!confirm(`Tem certeza que deseja deletar a sala "${room.name}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api(`/api/admin/rooms/${room.id}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   useEffect(() => { load(); const timer = setInterval(load, 5000); return () => clearInterval(timer); }, [load]);
   useEffect(() => () => { for (const timer of liveReportTimers.current) clearInterval(timer); }, []);
   const openReport = (room, type) => {
@@ -93,7 +102,7 @@ function AdminDashboard({ onClose }) {
       <div className="admin-room-grid">{rooms.map(room => <article key={room.id}>
         <div><span className={`room-state ${room.status}`}>{room.status === 'open' ? 'Em andamento' : 'Encerrada'}</span><code>{room.code}</code></div>
         <h2>{room.name}</h2><p>Responsável: {room.owner.name} · {room.memberCount} participante(s)</p>
-        <div className="room-actions"><button onClick={() => openReport(room, 'partial')}>Relatório parcial</button>{room.status === 'closed' && <button onClick={() => openReport(room, 'final')}>Relatório final</button>}</div>
+        <div className="room-actions"><button onClick={() => openReport(room, 'partial')}>Relatório parcial</button>{room.status === 'closed' && <button onClick={() => openReport(room, 'final')}>Relatório final</button>}<button onClick={() => deleteRoom(room)} style={{ color: '#d9534f', borderColor: '#d9534f' }}>Deletar</button></div>
       </article>)}</div>
     </div>
   </div>;
@@ -142,8 +151,8 @@ function Lobby({ user, onEnterRoom }) {
       <header><div className="lobby-brand"><img src={logoUrl} alt="Sim SD" /><div><h1>Salas SimSD Chair</h1><p>Sincronização ao vivo entre chairs e delegados</p></div></div><div className="user-menu"><span><strong>{user.name}</strong><small>{roleLabel(user.role)}</small></span>{user.role === 'admin' && <button onClick={() => setAdminOpen(true)}>Painel admin</button>}<button onClick={logoutNow}>Sair</button></div></header>
       {error && <div className="portal-error">{error}</div>}
       <div className="lobby-columns">
-        <section className="create-room"><h2>Criar uma sala</h2><form onSubmit={createRoom}><label>Nome da sessão<input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: UNESCO — Sessão 1" required /></label><label>Comitê<select value={committeeKey} onChange={e => setCommitteeKey(e.target.value)}><option value="camara">Câmara dos Deputados</option><option value="unodc">UNODC</option><option value="oea">OEA</option><option value="unesco">UNESCO</option></select></label><button className="portal-primary">Criar e entrar</button></form></section>
-        <section className="rooms-list"><div className="section-head"><div><h2>Salas disponíveis</h2><p>{user.role === 'simsd_tools' ? 'Você pode entrar em qualquer sala aberta.' : 'Salas criadas por você ou para as quais foi adicionado.'}</p></div><button onClick={load}>Atualizar</button></div>
+        {user.role !== 'student' && <section className="create-room"><h2>Criar uma sala</h2><form onSubmit={createRoom}><label>Nome da sessão<input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: UNESCO — Sessão 1" required /></label><label>Comitê<select value={committeeKey} onChange={e => setCommitteeKey(e.target.value)}><option value="camara">Câmara dos Deputados</option><option value="unodc">UNODC</option><option value="oea">OEA</option><option value="unesco">UNESCO</option></select></label><button className="portal-primary">Criar e entrar</button></form></section>}
+        <section className="rooms-list" style={{ gridColumn: user.role === 'student' ? '1 / -1' : undefined }}><div className="section-head"><div><h2>Salas disponíveis</h2><p>{user.role === 'simsd_tools' ? 'Você pode entrar em qualquer sala aberta.' : 'Salas criadas por você ou para as quais foi adicionado.'}</p></div><button onClick={load}>Atualizar</button></div>
           <div className="room-list-grid">{rooms.length ? rooms.map(room => <article key={room.id}><div className="room-card-head"><span className={`room-state ${room.status}`}>{room.status === 'open' ? 'Aberta' : 'Encerrada'}</span><code>{room.code}</code></div><h3>{room.name}</h3><p>{room.owner.name}</p><div className="room-actions"><button className="portal-primary" onClick={() => onEnterRoom(room)}>{room.status === 'open' ? 'Entrar na sala' : 'Visualizar'}</button>{room.canManage && <button onClick={() => setMembersRoom(room)}>Pessoas</button>}</div></article>) : <div className="empty-rooms">Nenhuma sala disponível ainda.</div>}</div>
         </section>
       </div>

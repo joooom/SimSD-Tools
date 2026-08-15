@@ -56,11 +56,21 @@ async function connect(roomId, cookie) {
   return { socket, inbox };
 }
 
-const owner = await login('student', 'Owner Student');
+const owner = await login('simsd_tools', 'Owner Chair');
 const invited = await login('student', 'Invited Student');
 const outsider = await login('student', 'Outside Student');
 const tools = await login('simsd_tools', 'Tools User');
 const admin = await login('admin', 'Admin User');
+
+// Test student permissions: creating room should return 403
+await request('/api/rooms', {
+  cookie: invited.cookie, method: 'POST', body: { name: `Sala Estudante Inválida ${suffix}`, committeeKey: 'unesco' }, expected: 403,
+});
+
+// Test student permissions: accessing admin panel should return 403
+await request('/api/admin/rooms', { cookie: invited.cookie, expected: 403 });
+await request('/api/admin/reports', { cookie: invited.cookie, expected: 403 });
+await request('/api/users/search?q=test', { cookie: invited.cookie, expected: 403 });
 
 const { data: created } = await request('/api/rooms', {
   cookie: owner.cookie, method: 'POST', body: { name: `Integração ${suffix}`, committeeKey: 'unesco' }, expected: 201,
@@ -134,4 +144,10 @@ assert.equal((await request('/api/rooms', { cookie: invited.cookie })).data.room
 
 first.socket.close();
 second.socket.close();
-console.log('Integration suite passed: auth roles, room ACL, invites, WebSocket sync/conflicts, live/final reports.');
+
+// Test admin room deletion
+await request(`/api/admin/rooms/${room.id}`, { cookie: invited.cookie, method: 'DELETE', expected: 403 });
+await request(`/api/admin/rooms/${room.id}`, { cookie: admin.cookie, method: 'DELETE', expected: 200 });
+assert.equal((await request('/api/admin/rooms', { cookie: admin.cookie })).data.rooms.some(item => item.id === room.id), false);
+
+console.log('Integration suite passed: auth roles, student restrictions, room ACL, invites, WebSocket sync/conflicts, live/final reports, admin deletion.');
