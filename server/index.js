@@ -110,7 +110,7 @@ function broadcastPresence(roomId) {
   const clients = [...(socketsByRoom.get(roomId) || [])].filter(socket => socket.readyState === WebSocket.OPEN);
   broadcast(roomId, {
     type: 'presence', count: clients.length,
-    users: clients.map(socket => publicUser(socket.simsdUser)),
+    users: clients.map(socket => ({ id: socket.simsdUser.id, name: socket.simsdUser.name, role: socket.simsdUser.role })),
   });
 }
 
