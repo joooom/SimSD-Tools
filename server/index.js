@@ -161,8 +161,8 @@ async function handleApi(req, res, url) {
     if (!name) throw Object.assign(new Error('Informe o nome da sala.'), { status: 400 });
     const rawCommittee = String(body.committeeKey || '').trim().toLowerCase();
     const validCommittees = ['camara', 'unodc', 'oea', 'unesco'];
-    const committeeKey = validCommittees.includes(rawCommittee) ? rawCommittee : (rawCommittee.slice(0, 40) || null);
-    const now = nowIso();
+    const committeeKey = validCommittees.includes(rawCommittee) ? rawCommittee : null;
+    if (!committeeKey) throw Object.assign(new Error('Comitê inválido.'), { status: 400 });
     const room = { id: randomUUID(), code: generateRoomCode(), name, committeeKey };
     db.prepare(`INSERT INTO rooms(id,code,name,committee_key,owner_user_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?)`)
       .run(room.id, room.code, room.name, room.committeeKey, user.id, now, now);
