@@ -22,7 +22,7 @@ O backend implementa Authorization Code com PKCE S256. O access token do portal 
 
 - `admin`: acessa todas as salas, administra participantes e consulta relatórios parciais/finais.
 - `simsd_tools`: cria salas, acessa salas às quais foi adicionado e qualquer sala aberta.
-- `student`: cria salas e acessa somente salas próprias ou às quais foi adicionado.
+- `student`: não cria salas e acessa somente salas próprias ou às quais foi adicionado.
 
 Como o OAuth do portal fornece apenas o perfil da pessoa autenticada e não um diretório de usuários, um convite por e-mail, login ou ID só pode ser feito depois que a pessoa entrar neste app ao menos uma vez.
 
