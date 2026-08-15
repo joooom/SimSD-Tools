@@ -30,12 +30,16 @@ class SessionSync {
       const message = JSON.parse(event.data);
       if (message.type === 'state:init') {
         this.version = message.version || 0;
+        if (message.room?.status === 'closed') {
+          if (message.state) window.SimSDController?.applyRemoteState(message.state);
+          this.emit({ type: 'closed' });
+          return;
+        }
         if (message.state) window.SimSDController?.applyRemoteState(message.state);
         else {
           window.SimSDController?.startFreshRoom(room.committeeKey);
           this.pushState(window.SimSDController?.snapshot(), true);
         }
-        if (message.room?.status === 'closed') this.emit({ type: 'closed' });
       } else if (message.type === 'state:update') {
         clearTimeout(this.pushTimer);
         this.version = message.version || this.version;
