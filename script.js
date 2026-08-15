@@ -59,6 +59,7 @@ const CTRY=[
   {c:'Uruguai',o:'República Oriental do Uruguai',f:'🇺🇾',r:'americas',i:'uy'},
   {c:'Venezuela',o:'República Bolivariana da Venezuela',f:'🇻🇪',r:'americas',i:'ve'}
 ];
+const LOGO_ALT_URL=new URL('./logo-alt.png',import.meta.url).href;
 const CSNU_MEMBERS=['China','Estados Unidos','França','Reino Unido','Rússia','Brasil','Índia','Quênia','México','Emirados Árabes Unidos'];
 
 /* ══════════════════════════════════════════════════════
@@ -491,7 +492,7 @@ function initApp(){
   document.getElementById('tb-committee').textContent=S.config.committee;
   document.getElementById('tb-session').textContent=S.config.session;
   document.getElementById('agenda-txt').textContent=S.agenda;
-  document.getElementById('app-logo').src='logo-alt.png';
+  document.getElementById('app-logo').src=LOGO_ALT_URL;
   updateMajority();
   populateSelects();
   renderRP();
@@ -1395,8 +1396,21 @@ tickClock();
 /* ══════════════════════════════════════════════════════
    BOOT
    ══════════════════════════════════════════════════════ */
+Object.assign(window,{
+  chooseCommittee,backToCommittee,renderCountryGrid,filterRegion,toggleSetup,
+  selectVisible,deselectAll,selectCSNU,selectALL193,startSession,goSetup,
+  encerrarSessao,resetSession,switchTab,inlineEdit,saveInline,openCfg,saveConfig,
+  openPanel,closePanel,gslPP,gslReset,gslStop,gslPreset,gslCustom,gslNext,
+  toggleYield,yieldToChair,yieldToCountry,clearHistory,addSpeaker,removeSpk,
+  dragStart,dragStartMod,dragOver,dragLeave,dragEnd,dropRow,dropRowMod,
+  addMotion,voteMotion,delMotion,setCustomName,concluirPresenca,setPresence,setAll,
+  exportCSV,registerVote,generateReport,exportSessionJSON,pickR,startVote,resetVote,
+  castVote,modPP,modReset,modNext,removeModSpk,unmodPP,unmodReset,openCaucus,
+  applyCaucus,soloPP,soloReset,renderRP,
+});
+
 load();
-document.getElementById('setup-logo').src='logo-alt.png';
+document.getElementById('setup-logo').src=LOGO_ALT_URL;
 renderCountryGrid();
 if(S.setupDone){
   document.getElementById('committee-screen').classList.add('hidden');
