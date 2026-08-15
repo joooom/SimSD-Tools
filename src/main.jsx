@@ -1,6 +1,7 @@
 import React from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import 'material-icons/iconfont/filled.css';
 import '../style.css';
 import GslTab from './tabs/GslTab.jsx';
 import MotionsTab from './tabs/MotionsTab.jsx';
@@ -9,6 +10,7 @@ import UnmoderatedTab from './tabs/UnmoderatedTab.jsx';
 import SoloSpeakerTab from './tabs/SoloSpeakerTab.jsx';
 import VotingTab from './tabs/VotingTab.jsx';
 import PresenceTab from './tabs/PresenceTab.jsx';
+import PortalShell from './PortalShell.jsx';
 
 function SimSDApp() {
   const markup = document.getElementById('app-template').innerHTML;
@@ -40,3 +42,12 @@ for (const [hostId, TabComponent] of tabs) {
 }
 
 await import('../script.js');
+
+const portalRoot = createRoot(document.getElementById('portal-root'));
+portalRoot.render(<PortalShell />);
+
+if ('serviceWorker' in navigator) {
+  const registerOfflineShell = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if (document.readyState === 'complete') registerOfflineShell();
+  else window.addEventListener('load', registerOfflineShell, { once: true });
+}

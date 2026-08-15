@@ -121,7 +121,7 @@ const COMMITTEES={
 /* ══════════════════════════════════════════════════════
    STATE
    ══════════════════════════════════════════════════════ */
-let S={
+function makeDefaultState(){return{
   config:{conference:'SimSD 2026',committee:'CSNU',session:'1ª Sessão',defaultTime:60,warnTime:15},
   committeeCountries:[],
   presence:{}, speeches:{}, speakTime:{},
@@ -144,47 +144,55 @@ let S={
   committeeType:'onu',
   regionFilter:'all',
   selectedSetup:new Set(),
-};
+};}
+
+let S=makeDefaultState();
+let activeRoomId=null;
+let applyingRemoteState=false;
+
+function stateStorageKey(){return activeRoomId?`simsd-room-${activeRoomId}`:'simsd-v4';}
+function hydrateState(p){
+  const defaults=makeDefaultState();
+  S={...defaults,...(p||{})};
+  S.config={...defaults.config,...(p?.config||{})};
+  S.timer={...defaults.timer,...(p?.timer||{}),running:false,iv:null};
+  S.mod={...defaults.mod,...(p?.mod||{}),running:false,iv:null};
+  S.unmod={...defaults.unmod,...(p?.unmod||{}),running:false,iv:null};
+  S.solo={...defaults.solo,...(p?.solo||{}),running:false,iv:null};
+  S.voteConfig={...defaults.voteConfig,...(p?.voteConfig||{})};
+  S.presence=S.presence||{};S.speeches=S.speeches||{};S.speakTime=S.speakTime||{};
+  S.votes=S.votes||{};S.motions=S.motions||[];S.history=S.history||[];
+  S.speakers=S.speakers||[];S.voteHistory=S.voteHistory||[];S.committeeCountries=S.committeeCountries||[];
+  if(!Array.isArray(S.mod.spks))S.mod.spks=[];
+  if(typeof S.mod.cur!=='number')S.mod.cur=0;
+  if(typeof S.curIdx!=='number')S.curIdx=0;
+  S.selectedSetup=new Set(p?.selectedSetupArr||[]);
+}
+
+function sessionSnapshot(){
+  return {...S,
+    selectedSetupArr:[...S.selectedSetup],
+    timer:{...S.timer,running:false,iv:null},
+    mod:{...S.mod,running:false,iv:null},
+    unmod:{...S.unmod,running:false,iv:null},
+    solo:{...S.solo,running:false,iv:null}
+  };
+}
 
 function load(){
   try{
-    const d=localStorage.getItem('simsd-v4');
+    const d=localStorage.getItem(stateStorageKey());
     if(d){
       const p=JSON.parse(d);
-      // Preserve default nested objects, then overlay saved values (deep-safe).
-      const defConfig={...S.config}, defTimer={...S.timer}, defMod={...S.mod},
-            defUnmod={...S.unmod}, defSolo={...S.solo}, defVoteConfig={...S.voteConfig};
-      Object.assign(S,p);
-      // Re-merge nested objects so newly-added fields are never lost to stale saves.
-      S.config={...defConfig,...(p.config||{})};
-      S.timer={...defTimer,...(p.timer||{})};
-      S.mod={...defMod,...(p.mod||{})};
-      S.unmod={...defUnmod,...(p.unmod||{})};
-      S.solo={...defSolo,...(p.solo||{})};
-      S.voteConfig={...defVoteConfig,...(p.voteConfig||{})};
-      // Guarantee collections exist.
-      S.presence=S.presence||{}; S.speeches=S.speeches||{}; S.speakTime=S.speakTime||{};
-      S.votes=S.votes||{}; S.motions=S.motions||[]; S.history=S.history||[];
-      S.speakers=S.speakers||[]; S.voteHistory=S.voteHistory||[];
-      S.committeeCountries=S.committeeCountries||[];
-      if(!Array.isArray(S.mod.spks))S.mod.spks=[];
-      if(typeof S.mod.cur!=='number')S.mod.cur=0;
-      if(typeof S.curIdx!=='number')S.curIdx=0;
-      S.selectedSetup=new Set(p.selectedSetupArr||[]);
-      ['timer','mod','unmod','solo'].forEach(k=>{if(S[k]){S[k].running=false;S[k].iv=null;}});
+      hydrateState(p);
     }
   }catch(e){}
 }
 function save(){
   try{
-    const cp={...S,
-      selectedSetupArr:[...S.selectedSetup],
-      timer:{...S.timer,running:false,iv:null},
-      mod:{...S.mod,running:false,iv:null},
-      unmod:{...S.unmod,running:false,iv:null},
-      solo:{...S.solo,running:false,iv:null}
-    };
-    localStorage.setItem('simsd-v4',JSON.stringify(cp));
+    const cp=sessionSnapshot();
+    localStorage.setItem(stateStorageKey(),JSON.stringify(cp));
+    if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
   }catch(e){}
 }
 function fmt(s){const m=Math.floor(Math.max(0,s)/60),x=Math.max(0,s)%60;return`${m}:${String(x).padStart(2,'0')}`;}
@@ -221,6 +229,9 @@ function flagImg(country,flag,iso,size){
   size=size||22;
   const code=iso||isoOf(country)||'';
   const fb=flag||'🏳️';
+  if(window.SimSDOfflineMode){
+    return `<span class="flag-emoji" style="font-size:${size}px">${fb}</span>`;
+  }
   if(!code){
     if(fb==='🏛️') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">account_balance</span>`;
     if(fb==='🌐') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">public</span>`;
@@ -291,13 +302,21 @@ function chooseCommittee(key){
   S.committeeKey=key;
   S.committeeType=cm.type;
   S.config.committee=cm.name;
-  // Pre-fill setup fields
-  document.getElementById('s-committee').value=cm.name;
-  document.getElementById('setup-title').textContent=cm.name;
-  document.getElementById('setup-theme').textContent='Tema: '+cm.theme;
+  configureCommitteeSetup(cm);
   // Clear any previous selection
   S.selectedSetup=new Set();
   regionFilterActive='all';
+  document.getElementById('country-search').value='';
+  renderCountryGrid();
+  save();
+}
+
+function configureCommitteeSetup(cm){
+  if(!cm)return;
+  // Pre-fill setup fields without mutating an existing remote selection.
+  document.getElementById('s-committee').value=cm.name;
+  document.getElementById('setup-title').textContent=cm.name;
+  document.getElementById('setup-theme').textContent='Tema: '+cm.theme;
   // Configure the selection UI for the committee type
   const isCamara=cm.type==='camara';
   document.getElementById('region-pills').style.display=isCamara?'none':'';
@@ -308,8 +327,6 @@ function chooseCommittee(key){
   // Show setup screen
   document.getElementById('committee-screen').classList.add('hidden');
   document.getElementById('setup-screen').classList.remove('hidden');
-  renderCountryGrid();
-  save();
 }
 function backToCommittee(){
   document.getElementById('setup-screen').classList.add('hidden');
@@ -348,14 +365,17 @@ function renderCountryGrid(){
 }
 function filterRegion(r,el){
   regionFilterActive=r;
+  S.regionFilter=r;
   document.querySelectorAll('.rpill').forEach(p=>p.classList.remove('on'));
-  el.classList.add('on');
+  el?.classList.add('on');
   renderCountryGrid();
+  save();
 }
 function toggleSetup(code){
   if(S.selectedSetup.has(code))S.selectedSetup.delete(code);
   else S.selectedSetup.add(code);
   renderCountryGrid();
+  save();
 }
 function selectVisible(){
   const search=(document.getElementById('country-search')?.value||'').toLowerCase();
@@ -363,15 +383,17 @@ function selectVisible(){
   activeRoster().filter(c=>(isCamara||regionFilterActive==='all'||c.r===regionFilterActive)&&(c.c.toLowerCase().includes(search)||(c.sub&&c.sub.toLowerCase().includes(search))))
     .forEach(c=>S.selectedSetup.add(c.c));
   renderCountryGrid();
+  save();
 }
-function deselectAll(){S.selectedSetup.clear();renderCountryGrid();}
+function deselectAll(){S.selectedSetup.clear();renderCountryGrid();save();}
 function selectCSNU(){
   if(S.committeeType==='camara')return; // CSNU não se aplica à Câmara
   const valid=new Set(activeRoster().map(c=>c.c));
   CSNU_MEMBERS.forEach(c=>{ if(valid.has(c))S.selectedSetup.add(c); });
   renderCountryGrid();
+  save();
 }
-function selectALL193(){activeRoster().forEach(c=>S.selectedSetup.add(c.c));renderCountryGrid();}
+function selectALL193(){activeRoster().forEach(c=>S.selectedSetup.add(c.c));renderCountryGrid();save();}
 
 function startSession(){
   if(S.selectedSetup.size===0)return;
@@ -459,23 +481,32 @@ function saveOrderSnapshot(){
     localStorage.setItem(ORDER_KEY,JSON.stringify(all));
   }catch(e){}
 }
-function encerrarSessao(){
+async function encerrarSessao(){
   if(!confirm('Encerrar a sessão? Será gerado o relatório completo e a ordem atual dos discursos será registrada para que você possa continuar em uma nova sessão deste mesmo comitê.'))return;
   // 1) Record the speaker order for later resumption
   saveOrderSnapshot();
   // 2) Mark session as closed and persist
   S.sessionEnded=true;
   save();
+  if(activeRoomId){
+    try{await window.SimSDSync?.closeRoom();}
+    catch(error){alert(error.message||'Não foi possível encerrar a sala.');return;}
+  }
   // 3) Generate the full report
   generateReport();
 }
 function resetSession(){
   if(!confirm('Resetar a sessão? Isso vai APAGAR todos os oradores, presença, moções, votos e histórico, limpar o cache da página e voltar à tela de configuração inicial. Esta ação não pode ser desfeita.'))return;
   stopAll();
-  // Clear all local data
-  try{localStorage.removeItem('simsd-v4');}catch(e){}
-  try{localStorage.clear();}catch(e){}
-  try{sessionStorage.clear();}catch(e){}
+  if(activeRoomId){
+    const committeeKey=S.committeeKey;
+    startFreshRoom(committeeKey);
+    save();
+    return;
+  }
+  // Clear only this application's standalone state. Room snapshots and unrelated
+  // browser data must remain intact.
+  try{localStorage.removeItem(stateStorageKey());}catch(e){}
   // Clear any cached storage (service worker / Cache API), then hard-reload
   const done=()=>{ location.reload(); };
   try{
@@ -629,11 +660,12 @@ function gslPP(){
     document.getElementById('btn-gsl-pp').textContent='pause';
     S.timer.iv=setInterval(()=>{
       if(S.timer.sec<=0){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';gslNext();return;}
-      S.timer.sec--;updateGslTimer();
+      S.timer.sec--;updateGslTimer();save();
     },1000);
   }
+  save();
 }
-function gslReset(){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();}
+function gslReset(){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
 function gslStop(){
   // "Parar": finaliza o discurso do orador atual, registrando o tempo falado
   // no histórico e encerrando o turno (igual a "Próximo Orador").
@@ -981,15 +1013,20 @@ function registerVote(){
   S.votes={};renderVote();
 }
 
-// Generate a complete printable session report (save as PDF via print dialog)
-function generateReport(){
+// Build the printable report used both by the chair and by the admin panel.
+function buildReportHTML(options={}){
+  const isPartial=options.type==='partial';
   const cc=S.committeeCountries;
   const now=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
   const presLabel={presente:'Presente','presente-votante':'Presente e Votante',ausente:'Ausente'};
   const voteLabel={fav:'A Favor',fdr:'A Favor c/ Direito',con:'Contra',cdr:'Contra c/ Direito',abs:'Abstenção'};
   const TR=isCamaraCte()?'Representação':'País'; const TRs=isCamaraCte()?'Representações':'Países';
   const nm=(code)=>dispName(code);
-  const flag=(name,f,iso)=>{const code=iso||isoOf(name)||'';return code?`<img src="https://flagcdn.com/h20/${code}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';};
+  const flag=(name,f,iso)=>{
+    if(window.SimSDOfflineMode)return f?`<span style="margin-right:5px">${f}</span>`:'';
+    const code=iso||isoOf(name)||'';
+    return code?`<img src="https://flagcdn.com/h20/${code}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';
+  };
 
   // Presence counts
   const pPres=cc.filter(c=>S.presence[c.c]==='presente').length;
@@ -1064,8 +1101,7 @@ function generateReport(){
   const appLogoSrc=escapeHtmlAttr((document.getElementById('app-logo')||{}).src||'');
 
   const reportHTML=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Relatório — ${S.config.committee} — ${S.config.session}</title>
-<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<title>${isPartial?'Relatório parcial':'Relatório'} — ${S.config.committee} — ${S.config.session}</title>
 <style>
   @page { margin: 1.5cm; }
   * { box-sizing: border-box; }
@@ -1094,15 +1130,18 @@ function generateReport(){
   .printbtn { position: fixed; top: 16px; right: 16px; background:#8B1A1A; color:white; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   .material-icons { font-family: 'Material Icons'; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1; display: inline-block; text-transform: none; -webkit-font-smoothing: antialiased; vertical-align: middle; }
   .inline-icon { font-size: 14px !important; margin-right: 4px; vertical-align: middle; }
+  .live-note { display:inline-flex;align-items:center;gap:7px;background:#edf7f1;color:#145c30;border:1px solid #b9dfc8;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;margin-top:6px; }
+  .live-note::before { content:'';width:7px;height:7px;border-radius:50%;background:#2f9f5d;box-shadow:0 0 0 3px rgba(47,159,93,.14); }
 </style></head>
 <body>
-  <button class="printbtn noprint" onclick="window.print()"><span class="material-icons inline-icon">print</span>Imprimir / Salvar PDF</button>
+  <button class="printbtn noprint" onclick="window.print()">&#128424;&#65039; Imprimir / Salvar PDF</button>
   <div class="rhead">
     <img src="${appLogoSrc}" style="height:56px">
     <div>
       <h1>${S.config.conference} — ${S.config.committee}</h1>
       <p>${S.config.session} · Relatório gerado em ${now}</p>
       <p>Agenda: ${S.agenda}</p>
+      ${isPartial?'<span class="live-note">Relatório parcial · atualização automática</span>':''}
     </div>
   </div>
 
@@ -1116,7 +1155,7 @@ function generateReport(){
   </div>
   <p style="font-size:13px">Maioria Simples: <b>${ms||'—'}</b> · Maioria Qualificada: <b>${mq||'—'}</b></p>
 
-  ${pendingSpeakers?`<h2>Lista de Oradores (ao Encerrar a Sessão)</h2>
+  ${pendingSpeakers?`<h2>Lista de Oradores (${isPartial?'em andamento':'ao Encerrar a Sessão'})</h2>
   <table class="rtable"><thead><tr><th style="text-align:center">#</th><th>${TR}</th></tr></thead><tbody>${pendingSpeakers}</tbody></table>
   <p style="font-size:12px;color:#6a635c">${S.speakers.length} orador(es) na fila · posição ${S.curIdx+1}º ao encerrar</p>`:''}
 
@@ -1141,9 +1180,15 @@ function generateReport(){
   <h2>Votações</h2>
   ${voteBlocks}
 
-  <div class="rfoot">Documento gerado automaticamente pelo Sim SD Chair · ${now}</div>
+  <div class="rfoot">${isPartial?'Relatório parcial atualizado automaticamente':'Documento gerado automaticamente pelo Sim SD Chair'} · ${now}</div>
 </body></html>`;
 
+  return reportHTML;
+}
+
+// Generate a complete printable session report (save as PDF via print dialog)
+function generateReport(){
+  const reportHTML=buildReportHTML({type:'final'});
   const w=window.open('','_blank');
   if(!w){alert('Permita pop-ups para gerar o relatório.');return;}
   w.document.write(reportHTML);
@@ -1273,10 +1318,11 @@ function modPP(){
       if(S.mod.spkSec>0)S.mod.spkSec--;
       if(S.mod.totalSec>0)S.mod.totalSec--;
       if(S.mod.spkSec<=0||S.mod.totalSec<=0)modNext();
-      else updateModDisplay();
+      else{updateModDisplay();save();}
     },1000);}
+  save();
 }
-function modReset(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();}
+function modReset(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
 function modNext(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
 function renderModList(){
   // Current speaker = first in the mod queue (independent from the GSL list)
@@ -1312,9 +1358,10 @@ function updateUnmodDisplay(){document.getElementById('unmod-d').textContent=`${
 function unmodPP(){
   if(S.unmod.running){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';}
   else{S.unmod.running=true;document.getElementById('btn-unmod-pp').textContent='pause';
-    S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();},1000);}
+    S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();save();},1000);}
+  save();
 }
-function unmodReset(){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();}
+function unmodReset(){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    CAUCUS SETTINGS
@@ -1360,9 +1407,10 @@ function updateSoloDisplay(){const d=document.getElementById('solo-timer'),b=doc
 function soloPP(){
   if(S.solo.running){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';}
   else{S.solo.running=true;document.getElementById('btn-solo-pp').textContent='pause';
-    S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();},1000);}
+    S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();save();},1000);}
+  save();
 }
-function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();}
+function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    POPULATE SELECTS
@@ -1396,6 +1444,82 @@ tickClock();
 /* ══════════════════════════════════════════════════════
    BOOT
    ══════════════════════════════════════════════════════ */
+function showCurrentState(){
+  const committeeScreen=document.getElementById('committee-screen');
+  const setupScreen=document.getElementById('setup-screen');
+  const appScreen=document.getElementById('app-screen');
+  committeeScreen.classList.add('hidden');
+  setupScreen.classList.add('hidden');
+  appScreen.classList.remove('visible');
+  document.getElementById('setup-logo').src=LOGO_ALT_URL;
+  document.getElementById('s-conf').value=S.config.conference;
+  document.getElementById('s-session').value=S.config.session;
+  document.getElementById('s-time').value=S.config.defaultTime;
+  document.getElementById('s-warn').value=S.config.warnTime;
+
+  if(S.setupDone){
+    appScreen.classList.add('visible');
+    initApp();
+  }else if(S.committeeKey&&COMMITTEES[S.committeeKey]){
+    regionFilterActive=S.regionFilter||'all';
+    configureCommitteeSetup(COMMITTEES[S.committeeKey]);
+    document.querySelectorAll('.rpill').forEach(p=>p.classList.toggle('on',p.dataset.region===regionFilterActive));
+    renderCountryGrid();
+  }else{
+    committeeScreen.classList.remove('hidden');
+  }
+}
+
+function setRoomContext(roomId){
+  activeRoomId=roomId||null;
+}
+
+function startFreshRoom(committeeKey){
+  stopAll();
+  applyingRemoteState=true;
+  hydrateState(null);
+  if(committeeKey&&COMMITTEES[committeeKey]){
+    const cm=COMMITTEES[committeeKey];
+    S.committeeKey=committeeKey;
+    S.committeeType=cm.type;
+    S.config.committee=cm.name;
+  }
+  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  showCurrentState();
+  applyingRemoteState=false;
+}
+
+function applyRemoteState(snapshot){
+  if(!snapshot)return;
+  stopAll();
+  applyingRemoteState=true;
+  hydrateState(snapshot);
+  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  showCurrentState();
+  applyingRemoteState=false;
+}
+
+function reportHTMLForState(snapshot,options={}){
+  const previousState=S;
+  const previousApplying=applyingRemoteState;
+  try{
+    applyingRemoteState=true;
+    hydrateState(snapshot||{});
+    return buildReportHTML(options);
+  }finally{
+    S=previousState;
+    applyingRemoteState=previousApplying;
+  }
+}
+
+window.SimSDController={
+  snapshot:sessionSnapshot,
+  setRoomContext,
+  startFreshRoom,
+  applyRemoteState,
+  buildReportHTML:reportHTMLForState,
+};
+
 Object.assign(window,{
   chooseCommittee,backToCommittee,renderCountryGrid,filterRegion,toggleSetup,
   selectVisible,deselectAll,selectCSNU,selectALL193,startSession,goSetup,
@@ -1410,22 +1534,4 @@ Object.assign(window,{
 });
 
 load();
-document.getElementById('setup-logo').src=LOGO_ALT_URL;
-renderCountryGrid();
-if(S.setupDone){
-  document.getElementById('committee-screen').classList.add('hidden');
-  document.getElementById('setup-screen').classList.add('hidden');
-  document.getElementById('app-screen').classList.add('visible');
-  initApp();
-} else if(S.committeeKey){
-  // A committee was chosen but session not started — go straight to setup
-  document.getElementById('committee-screen').classList.add('hidden');
-  document.getElementById('setup-screen').classList.remove('hidden');
-  chooseCommittee(S.committeeKey);
-} else {
-  // Fresh start — show committee choice screen
-  document.getElementById('s-conf').value=S.config.conference;
-  document.getElementById('s-session').value=S.config.session;
-  document.getElementById('s-time').value=S.config.defaultTime;
-  document.getElementById('s-warn').value=S.config.warnTime;
-}
+showCurrentState();

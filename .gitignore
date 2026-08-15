@@ -1,6 +1,13 @@
 node_modules/
 dist/
 .vite/
+data/
+.playwright-mcp/
+simsd-admin-final.png
+simsd-final-room.png
+.env
+.env.*
+!.env.example
 # Logs
 logs
 *.log
