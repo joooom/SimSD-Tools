@@ -1,3 +1,16 @@
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(v) {
+  return escapeHtml(v);
+}
+
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
    ══════════════════════════════════════════════════════ */
@@ -59,6 +72,7 @@ const CTRY=[
   {c:'Uruguai',o:'República Oriental do Uruguai',f:'🇺🇾',r:'americas',i:'uy'},
   {c:'Venezuela',o:'República Bolivariana da Venezuela',f:'🇻🇪',r:'americas',i:'ve'}
 ];
+const LOGO_ALT_URL=new URL('./logo-alt.png',import.meta.url).href;
 const CSNU_MEMBERS=['China','Estados Unidos','França','Reino Unido','Rússia','Brasil','Índia','Quênia','México','Emirados Árabes Unidos'];
 
 /* ══════════════════════════════════════════════════════
@@ -120,7 +134,7 @@ const COMMITTEES={
 /* ══════════════════════════════════════════════════════
    STATE
    ══════════════════════════════════════════════════════ */
-let S={
+function makeDefaultState(){return{
   config:{conference:'SimSD 2026',committee:'CSNU',session:'1ª Sessão',defaultTime:60,warnTime:15},
   committeeCountries:[],
   presence:{}, speeches:{}, speakTime:{},
@@ -143,47 +157,55 @@ let S={
   committeeType:'onu',
   regionFilter:'all',
   selectedSetup:new Set(),
-};
+};}
+
+let S=makeDefaultState();
+let activeRoomId=null;
+let applyingRemoteState=false;
+
+function stateStorageKey(){return activeRoomId?`simsd-room-${activeRoomId}`:'simsd-v4';}
+function hydrateState(p){
+  const defaults=makeDefaultState();
+  S={...defaults,...(p||{})};
+  S.config={...defaults.config,...(p?.config||{})};
+  S.timer={...defaults.timer,...(p?.timer||{}),running:false,iv:null};
+  S.mod={...defaults.mod,...(p?.mod||{}),running:false,iv:null};
+  S.unmod={...defaults.unmod,...(p?.unmod||{}),running:false,iv:null};
+  S.solo={...defaults.solo,...(p?.solo||{}),running:false,iv:null};
+  S.voteConfig={...defaults.voteConfig,...(p?.voteConfig||{})};
+  S.presence=S.presence||{};S.speeches=S.speeches||{};S.speakTime=S.speakTime||{};
+  S.votes=S.votes||{};S.motions=S.motions||[];S.history=S.history||[];
+  S.speakers=S.speakers||[];S.voteHistory=S.voteHistory||[];S.committeeCountries=S.committeeCountries||[];
+  if(!Array.isArray(S.mod.spks))S.mod.spks=[];
+  if(typeof S.mod.cur!=='number')S.mod.cur=0;
+  if(typeof S.curIdx!=='number')S.curIdx=0;
+  S.selectedSetup=new Set(p?.selectedSetupArr||[]);
+}
+
+function sessionSnapshot(){
+  return {...S,
+    selectedSetupArr:[...S.selectedSetup],
+    timer:{...S.timer,running:false,iv:null},
+    mod:{...S.mod,running:false,iv:null},
+    unmod:{...S.unmod,running:false,iv:null},
+    solo:{...S.solo,running:false,iv:null}
+  };
+}
 
 function load(){
   try{
-    const d=localStorage.getItem('simsd-v4');
+    const d=localStorage.getItem(stateStorageKey());
     if(d){
       const p=JSON.parse(d);
-      // Preserve default nested objects, then overlay saved values (deep-safe).
-      const defConfig={...S.config}, defTimer={...S.timer}, defMod={...S.mod},
-            defUnmod={...S.unmod}, defSolo={...S.solo}, defVoteConfig={...S.voteConfig};
-      Object.assign(S,p);
-      // Re-merge nested objects so newly-added fields are never lost to stale saves.
-      S.config={...defConfig,...(p.config||{})};
-      S.timer={...defTimer,...(p.timer||{})};
-      S.mod={...defMod,...(p.mod||{})};
-      S.unmod={...defUnmod,...(p.unmod||{})};
-      S.solo={...defSolo,...(p.solo||{})};
-      S.voteConfig={...defVoteConfig,...(p.voteConfig||{})};
-      // Guarantee collections exist.
-      S.presence=S.presence||{}; S.speeches=S.speeches||{}; S.speakTime=S.speakTime||{};
-      S.votes=S.votes||{}; S.motions=S.motions||[]; S.history=S.history||[];
-      S.speakers=S.speakers||[]; S.voteHistory=S.voteHistory||[];
-      S.committeeCountries=S.committeeCountries||[];
-      if(!Array.isArray(S.mod.spks))S.mod.spks=[];
-      if(typeof S.mod.cur!=='number')S.mod.cur=0;
-      if(typeof S.curIdx!=='number')S.curIdx=0;
-      S.selectedSetup=new Set(p.selectedSetupArr||[]);
-      ['timer','mod','unmod','solo'].forEach(k=>{if(S[k]){S[k].running=false;S[k].iv=null;}});
+      hydrateState(p);
     }
   }catch(e){}
 }
 function save(){
   try{
-    const cp={...S,
-      selectedSetupArr:[...S.selectedSetup],
-      timer:{...S.timer,running:false,iv:null},
-      mod:{...S.mod,running:false,iv:null},
-      unmod:{...S.unmod,running:false,iv:null},
-      solo:{...S.solo,running:false,iv:null}
-    };
-    localStorage.setItem('simsd-v4',JSON.stringify(cp));
+    const cp=sessionSnapshot();
+    localStorage.setItem(stateStorageKey(),JSON.stringify(cp));
+    if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
   }catch(e){}
 }
 function fmt(s){const m=Math.floor(Math.max(0,s)/60),x=Math.max(0,s)%60;return`${m}:${String(x).padStart(2,'0')}`;}
@@ -220,17 +242,20 @@ function flagImg(country,flag,iso,size){
   size=size||22;
   const code=iso||isoOf(country)||'';
   const fb=flag||'🏳️';
+  if(window.SimSDOfflineMode){
+    return `<span class="flag-emoji" style="font-size:${Number(size)}px">${escapeHtml(fb)}</span>`;
+  }
   if(!code){
-    if(fb==='🏛️') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">account_balance</span>`;
-    if(fb==='🌐') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">public</span>`;
-    if(fb==='🏳️') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">flag</span>`;
-    return `<span class="flag-emoji" style="font-size:${size}px">${fb}</span>`;
+    if(fb==='🏛️') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">account_balance</span>`;
+    if(fb==='🌐') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">public</span>`;
+    if(fb==='🏳️') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">flag</span>`;
+    return `<span class="flag-emoji" style="font-size:${Number(size)}px">${escapeHtml(fb)}</span>`;
   }
   const w=Math.round(size*1.45);
-  const src=FLAG_OVERRIDE[code]||`https://flagcdn.com/h40/${code}.png`;
+  const src=FLAG_OVERRIDE[code]||`https://flagcdn.com/h40/${encodeURIComponent(code)}.png`;
   return `<img class="flagimg" src="${src}" `+
-    `data-fallback="${fb}" data-size="${size}" `+
-    `style="width:${w}px;height:${size}px;border-radius:3px;object-fit:cover;box-shadow:0 0 0 1px rgba(0,0,0,.08);vertical-align:middle">`;
+    `data-fallback="${escapeAttr(fb)}" data-size="${Number(size)}" `+
+    `style="width:${w}px;height:${Number(size)}px;border-radius:3px;object-fit:cover;box-shadow:0 0 0 1px rgba(0,0,0,.08);vertical-align:middle">`;
 }
 
 // Global, safe image-error fallback: replaces broken flag image with emoji span or Material Icon.
@@ -290,13 +315,21 @@ function chooseCommittee(key){
   S.committeeKey=key;
   S.committeeType=cm.type;
   S.config.committee=cm.name;
-  // Pre-fill setup fields
-  document.getElementById('s-committee').value=cm.name;
-  document.getElementById('setup-title').textContent=cm.name;
-  document.getElementById('setup-theme').textContent='Tema: '+cm.theme;
+  configureCommitteeSetup(cm);
   // Clear any previous selection
   S.selectedSetup=new Set();
   regionFilterActive='all';
+  document.getElementById('country-search').value='';
+  renderCountryGrid();
+  save();
+}
+
+function configureCommitteeSetup(cm){
+  if(!cm)return;
+  // Pre-fill setup fields without mutating an existing remote selection.
+  document.getElementById('s-committee').value=cm.name;
+  document.getElementById('setup-title').textContent=cm.name;
+  document.getElementById('setup-theme').textContent='Tema: '+cm.theme;
   // Configure the selection UI for the committee type
   const isCamara=cm.type==='camara';
   document.getElementById('region-pills').style.display=isCamara?'none':'';
@@ -307,8 +340,6 @@ function chooseCommittee(key){
   // Show setup screen
   document.getElementById('committee-screen').classList.add('hidden');
   document.getElementById('setup-screen').classList.remove('hidden');
-  renderCountryGrid();
-  save();
 }
 function backToCommittee(){
   document.getElementById('setup-screen').classList.add('hidden');
@@ -326,11 +357,12 @@ function renderCountryGrid(){
     return matchR&&matchS;
   });
   grid.innerHTML=filtered.map(c=>{
-    const sub=c.sub?`<small>${c.sub}</small>`:'';
+    const sub=c.sub?`<small>${escapeHtml(c.sub)}</small>`:'';
     const novote=isCamara&&!c.voto?'<span class="novote-tag">sem voto</span>':'';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
-    const label=c.disp||c.c;
-    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')" style="${isCamara?'min-height:46px':''}">
+    const label=escapeHtml(c.disp||c.c);
+    const safeCode=escapeAttr(c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
+    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${safeCode}')" style="${isCamara?'min-height:46px':''}">
       <span class="cf">${flag}</span>
       <span class="cn">${label}${novote}${sub}</span>
     </div>`;
@@ -347,14 +379,17 @@ function renderCountryGrid(){
 }
 function filterRegion(r,el){
   regionFilterActive=r;
+  S.regionFilter=r;
   document.querySelectorAll('.rpill').forEach(p=>p.classList.remove('on'));
-  el.classList.add('on');
+  el?.classList.add('on');
   renderCountryGrid();
+  save();
 }
 function toggleSetup(code){
   if(S.selectedSetup.has(code))S.selectedSetup.delete(code);
   else S.selectedSetup.add(code);
   renderCountryGrid();
+  save();
 }
 function selectVisible(){
   const search=(document.getElementById('country-search')?.value||'').toLowerCase();
@@ -362,15 +397,17 @@ function selectVisible(){
   activeRoster().filter(c=>(isCamara||regionFilterActive==='all'||c.r===regionFilterActive)&&(c.c.toLowerCase().includes(search)||(c.sub&&c.sub.toLowerCase().includes(search))))
     .forEach(c=>S.selectedSetup.add(c.c));
   renderCountryGrid();
+  save();
 }
-function deselectAll(){S.selectedSetup.clear();renderCountryGrid();}
+function deselectAll(){S.selectedSetup.clear();renderCountryGrid();save();}
 function selectCSNU(){
   if(S.committeeType==='camara')return; // CSNU não se aplica à Câmara
   const valid=new Set(activeRoster().map(c=>c.c));
   CSNU_MEMBERS.forEach(c=>{ if(valid.has(c))S.selectedSetup.add(c); });
   renderCountryGrid();
+  save();
 }
-function selectALL193(){activeRoster().forEach(c=>S.selectedSetup.add(c.c));renderCountryGrid();}
+function selectALL193(){activeRoster().forEach(c=>S.selectedSetup.add(c.c));renderCountryGrid();save();}
 
 function startSession(){
   if(S.selectedSetup.size===0)return;
@@ -458,23 +495,32 @@ function saveOrderSnapshot(){
     localStorage.setItem(ORDER_KEY,JSON.stringify(all));
   }catch(e){}
 }
-function encerrarSessao(){
+async function encerrarSessao(){
   if(!confirm('Encerrar a sessão? Será gerado o relatório completo e a ordem atual dos discursos será registrada para que você possa continuar em uma nova sessão deste mesmo comitê.'))return;
   // 1) Record the speaker order for later resumption
   saveOrderSnapshot();
   // 2) Mark session as closed and persist
   S.sessionEnded=true;
   save();
+  if(activeRoomId){
+    try{await window.SimSDSync?.closeRoom();}
+    catch(error){alert(error.message||'Não foi possível encerrar a sala.');return;}
+  }
   // 3) Generate the full report
   generateReport();
 }
 function resetSession(){
   if(!confirm('Resetar a sessão? Isso vai APAGAR todos os oradores, presença, moções, votos e histórico, limpar o cache da página e voltar à tela de configuração inicial. Esta ação não pode ser desfeita.'))return;
   stopAll();
-  // Clear all local data
-  try{localStorage.removeItem('simsd-v4');}catch(e){}
-  try{localStorage.clear();}catch(e){}
-  try{sessionStorage.clear();}catch(e){}
+  if(activeRoomId){
+    const committeeKey=S.committeeKey;
+    startFreshRoom(committeeKey);
+    save();
+    return;
+  }
+  // Clear only this application's standalone state. Room snapshots and unrelated
+  // browser data must remain intact.
+  try{localStorage.removeItem(stateStorageKey());}catch(e){}
   // Clear any cached storage (service worker / Cache API), then hard-reload
   const done=()=>{ location.reload(); };
   try{
@@ -491,7 +537,7 @@ function initApp(){
   document.getElementById('tb-committee').textContent=S.config.committee;
   document.getElementById('tb-session').textContent=S.config.session;
   document.getElementById('agenda-txt').textContent=S.agenda;
-  document.getElementById('app-logo').src='logo-alt.png';
+  document.getElementById('app-logo').src=LOGO_ALT_URL;
   updateMajority();
   populateSelects();
   renderRP();
@@ -628,11 +674,12 @@ function gslPP(){
     document.getElementById('btn-gsl-pp').textContent='pause';
     S.timer.iv=setInterval(()=>{
       if(S.timer.sec<=0){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';gslNext();return;}
-      S.timer.sec--;updateGslTimer();
+      S.timer.sec--;updateGslTimer();save();
     },1000);
   }
+  save();
 }
-function gslReset(){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();}
+function gslReset(){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
 function gslStop(){
   // "Parar": finaliza o discurso do orador atual, registrando o tempo falado
   // no histórico e encerrando o turno (igual a "Próximo Orador").
@@ -665,8 +712,8 @@ function toggleYield(){
   // populate yield country select (exclude current speaker)
   const cur=S.speakers[S.curIdx];
   const sel=document.getElementById('yield-country-sel');
-  sel.innerHTML='<option value="">'+selectPrompt()+'</option>'+
-    S.committeeCountries.filter(c=>!cur||c.c!==cur.c).map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  sel.innerHTML='<option value="">'+escapeHtml(selectPrompt())+'</option>'+
+    S.committeeCountries.filter(c=>!cur||c.c!==cur.c).map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
   box.style.display='';
 }
 // Records a finished speech. timeSpent = seconds actually spoken during this turn.
@@ -766,7 +813,7 @@ function renderSpeakers(){
   const cur=S.speakers[S.curIdx];
   document.getElementById('gsl-cur-flag').innerHTML=cur?flagImg(cur.c,cur.f,null,26):'<span class="material-icons" style="font-size:26px;vertical-align:middle;">account_balance</span>';
   document.getElementById('gsl-cur-name').textContent=cur?dispName(cur.c):'Nenhum orador';
-  document.getElementById('gsl-cur-meta').textContent=cur?`${S.speeches[cur.c]||0} discurso(s) nesta sessão`:'';
+  document.getElementById('gsl-cur-meta').textContent=cur?`${Number(S.speeches[cur.c])||0} discurso(s) nesta sessão`:'';
   document.getElementById('queue-badge').textContent=Math.max(0,S.speakers.length-1);
   const list=document.getElementById('gsl-list');
   if(S.speakers.length<=1){list.innerHTML='<div class="empty"><div class="empty-icon material-icons">reorder</div><div class="empty-txt" id="empty-add-txt">Clique à direita para adicionar</div></div>';return;}
@@ -780,8 +827,8 @@ function renderSpeakers(){
          data-idx="${i+1}">
       <span class="spk-num">${i+2}</span>
       <span class="spk-flag">${flagImg(s.c,s.f,null,19)}</span>
-      <span class="spk-name">${dispName(s.c)}</span>
-      <span class="spk-speech-count">${S.speeches[s.c]||0} disc.</span>
+      <span class="spk-name">${escapeHtml(dispName(s.c))}</span>
+      <span class="spk-speech-count">${Number(S.speeches[s.c])||0} disc.</span>
       <button class="btn-rm" onclick="removeSpk(${i+1})"><span class="material-icons" style="font-size:12px;">close</span></button>
       <span class="drag-handle material-icons" title="Arraste para reordenar">drag_indicator</span>
     </div>`).join('');
@@ -791,13 +838,13 @@ function renderHistory(){
   if(!S.history.length){el.innerHTML='<div class="empty" style="padding:.75rem"><div class="empty-txt">Nenhum discurso ainda</div></div>';return;}
   el.innerHTML=S.history.map(h=>{
     let tags='';
-    if(h.received)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);background:var(--green-pale);border:1px solid var(--green-mid);border-radius:9px;padding:1px 6px">recebeu de ${flagImg(h.received,h.receivedFlag,null,12)} ${h.received}</span>`;
+    if(h.received)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);background:var(--green-pale);border:1px solid var(--green-mid);border-radius:9px;padding:1px 6px">recebeu de ${flagImg(h.received,h.receivedFlag,null,12)} ${escapeHtml(h.received)}</span>`;
     if(h.yielded==='chair')tags+=`<span style="font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu ao Chair</span>`;
-    else if(h.yielded)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu a ${flagImg(h.yielded,h.yieldedFlag,null,12)} ${h.yielded}</span>`;
+    else if(h.yielded)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu a ${flagImg(h.yielded,h.yieldedFlag,null,12)} ${escapeHtml(h.yielded)}</span>`;
     return `<div class="hist-row">
-      <span class="hist-time">${h.t}</span>
+      <span class="hist-time">${escapeHtml(h.t)}</span>
       <span style="display:inline-flex;align-items:center">${flagImg(h.c,h.f,null,17)}</span>
-      <span style="font-size:13px;font-weight:500">${dispName(h.c)}</span>
+      <span style="font-size:13px;font-weight:500">${escapeHtml(dispName(h.c))}</span>
       <span style="display:inline-flex;gap:4px">${tags}</span>
       <span style="margin-left:auto;font-size:11px;color:var(--muted2)">${h.sec>0?fmt(h.sec)+' falados':'0:00'}</span>
     </div>`;
@@ -816,12 +863,13 @@ function renderRP(){
   const el=document.getElementById('rp-list');if(!el)return;
   el.innerHTML=list.map(c=>{
     const added=inList.has(c.c);
-    const count=S.speeches[c.c]||0;
+    const count=Number(S.speeches[c.c])||0;
     const isCamara=S.committeeType==='camara';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
-    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${c.c.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
+    const safeCode=escapeAttr(c.c.replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${safeCode}')">
       <span class="c-opt-flag">${flag}</span>
-      <span class="c-opt-name">${dispName(c.c)}</span>
+      <span class="c-opt-name">${escapeHtml(dispName(c.c))}</span>
       <span class="c-opt-count">${count}</span>
     </div>`;
   }).join('');
@@ -853,16 +901,16 @@ function renderMotions(){
   }
   el.innerHTML=S.motions.map(m=>`
     <div class="mo-item">
-      <span class="mo-badge ${MC[m.type]||'mt-other'}">${ML[m.type]||m.type}</span>
+      <span class="mo-badge ${escapeAttr(MC[m.type]||'mt-other')}">${escapeHtml(ML[m.type]||m.type)}</span>
       <div class="mo-info">
-        <div class="mo-prop">${dispName(m.prop)} <span style="font-size:11px;color:var(--muted2);font-weight:400">${m.ts}</span></div>
-        <div class="mo-det">${[m.dur?m.dur+' min':'',m.spk?m.spk+'s/orador':''].filter(Boolean).join(' · ')||''}</div>
+        <div class="mo-prop">${escapeHtml(dispName(m.prop))} <span style="font-size:11px;color:var(--muted2);font-weight:400">${escapeHtml(m.ts)}</span></div>
+        <div class="mo-det">${[m.dur?escapeHtml(m.dur)+' min':'',m.spk?escapeHtml(m.spk)+'s/orador':''].filter(Boolean).join(' · ')||''}</div>
       </div>
       ${m.status==='pending'?`
-        <button class="btn-app" onclick="voteMotion('${m.id}','approved')"><span class="material-icons inline-icon">check</span>Aprovar</button>
-        <button class="btn-rej" onclick="voteMotion('${m.id}','rejected')"><span class="material-icons inline-icon">close</span>Rejeitar</button>`
+        <button class="btn-app" onclick="voteMotion('${escapeAttr(m.id)}','approved')"><span class="material-icons inline-icon">check</span>Aprovar</button>
+        <button class="btn-rej" onclick="voteMotion('${escapeAttr(m.id)}','rejected')"><span class="material-icons inline-icon">close</span>Rejeitar</button>`
       :`<span class="mo-done ${m.status==='approved'?'mo-app-done':'mo-rej-done'}">${m.status==='approved'?`<span class="material-icons inline-icon">check</span>Aprovada`:`<span class="material-icons inline-icon">close</span>Rejeitada`}</span>`}
-      <button onclick="delMotion('${m.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:3px 5px;border-radius:4px;transition:color .15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'"><span class="material-icons" style="font-size:16px;">close</span></button>
+      <button onclick="delMotion('${escapeAttr(m.id)}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:3px 5px;border-radius:4px;transition:color .15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'"><span class="material-icons" style="font-size:16px;">close</span></button>
     </div>`).join('');
 }
 
@@ -900,18 +948,18 @@ function renderPresence(){
   tbody.innerHTML=cc.map(c=>{
     const s=S.presence[c.c]||'ausente';
     const canVote=c.voto!==false;
-    const esc=c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+    const escCode=escapeAttr(c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
     const votanteOpt=canVote?`<option value="presente-votante" ${s==='presente-votante'?'selected':''}>Pres. Votante</option>`:'';
-    const statusSel=`<select class="psel ps-${s.replace(' ','-')}" onchange="setPresence('${esc}',this.value,this)">
+    const statusSel=`<select class="psel ps-${escapeAttr(s.replace(' ','-'))}" onchange="setPresence('${escCode}',this.value,this)">
         <option value="presente" ${s==='presente'?'selected':''}>Presente</option>
         ${votanteOpt}
         <option value="ausente" ${s==='ausente'?'selected':''}>Ausente</option>
       </select>`;
     if(isCamara){
       const noVote=!canVote?' <span class="novote-tag" style="background:var(--bg);color:var(--muted);font-size:9px;border-radius:8px;padding:0 6px">sem voto</span>':'';
-      const nameCell=`<span class="rep-name">${dispName(c.c)}</span>`;
+      const nameCell=`<span class="rep-name">${escapeHtml(dispName(c.c))}</span>`;
       return`<tr>
-        <td><div class="rep-cell">${nameCell}${noVote}<div class="rep-sub">${c.sub||''}</div></div></td>
+        <td><div class="rep-cell">${nameCell}${noVote}<div class="rep-sub">${escapeHtml(c.sub||'')}</div></div></td>
         <td>${statusSel}</td>
       </tr>`;
     }
@@ -919,7 +967,7 @@ function renderPresence(){
     const noVote=!canVote?' <span class="novote-tag" style="background:var(--bg);color:var(--muted);font-size:9px;border-radius:8px;padding:0 6px">sem voto</span>':'';
     return`<tr>
       <td>${flagImg(c.c,c.f,c.i,20)}</td>
-      <td><div class="rep-cell"><span class="rep-name">${dispName(c.c)}${noVote}</span><div class="rep-sub">${info}</div></div></td>
+      <td><div class="rep-cell"><span class="rep-name">${escapeHtml(dispName(c.c))}${noVote}</span><div class="rep-sub">${escapeHtml(info)}</div></div></td>
       <td>${statusSel}</td>
     </tr>`;
   }).join('');
@@ -980,15 +1028,27 @@ function registerVote(){
   S.votes={};renderVote();
 }
 
-// Generate a complete printable session report (save as PDF via print dialog)
-function generateReport(){
+// Build the printable report used both by the chair and by the admin panel.
+function buildReportHTML(options={}){
+  const esc = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;');
+
+  const isPartial=options.type==='partial';
   const cc=S.committeeCountries;
   const now=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
   const presLabel={presente:'Presente','presente-votante':'Presente e Votante',ausente:'Ausente'};
   const voteLabel={fav:'A Favor',fdr:'A Favor c/ Direito',con:'Contra',cdr:'Contra c/ Direito',abs:'Abstenção'};
   const TR=isCamaraCte()?'Representação':'País'; const TRs=isCamaraCte()?'Representações':'Países';
-  const nm=(code)=>dispName(code);
-  const flag=(name,f,iso)=>{const code=iso||isoOf(name)||'';return code?`<img src="https://flagcdn.com/h20/${code}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';};
+  const nm=(code)=>esc(dispName(code));
+  const flag=(name,f,iso)=>{
+    if(window.SimSDOfflineMode)return f?`<span style="margin-right:5px">${esc(f)}</span>`:'';
+    const code=iso||isoOf(name)||'';
+    return code?`<img src="https://flagcdn.com/h20/${encodeURIComponent(code)}.png" style="height:13px;border-radius:2px;vertical-align:middle;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)">`:'';
+  };
 
   // Presence counts
   const pPres=cc.filter(c=>S.presence[c.c]==='presente').length;
@@ -1019,30 +1079,30 @@ function generateReport(){
   // History (chronological — reverse since stored newest-first)
   const histRows=[...S.history].reverse().map(h=>{
     const obsArr=[];
-    if(h.received)obsArr.push(`Recebeu de ${h.received}`);
+    if(h.received)obsArr.push(`Recebeu de ${esc(h.received)}`);
     if(h.yielded==='chair')obsArr.push('Cedeu ao Chair');
-    else if(h.yielded)obsArr.push(`Cedeu a ${h.yielded}`);
+    else if(h.yielded)obsArr.push(`Cedeu a ${esc(h.yielded)}`);
     const obs=obsArr.length?obsArr.join(' · '):'—';
-    return `<tr><td>${h.t}</td><td>${flag(h.c,h.f)}${nm(h.c)}</td><td style="text-align:center">${fmt(h.sec)}</td><td>${obs}</td></tr>`;
+    return `<tr><td>${esc(h.t)}</td><td>${flag(h.c,h.f)}${nm(h.c)}</td><td style="text-align:center">${fmt(h.sec)}</td><td>${obs}</td></tr>`;
   }).join('');
 
   // Motions
   const ML2={unmod:'Sessão Não-Moderada',mod:'Sessão Moderada',vote:'Votação de Documento',recess:'Recesso',other:'Outra'};
-  const motionRows=S.motions.map(m=>`<tr><td>${m.ts}</td><td>${ML2[m.type]||m.type}</td><td>${flag(m.prop)}${nm(m.prop)}</td><td>${[m.dur?m.dur+' min':'',m.spk?m.spk+'s/orador':''].filter(Boolean).join(' · ')||'—'}</td><td>${m.status==='approved'?'✓ Aprovada':m.status==='rejected'?'✕ Rejeitada':'Pendente'}</td></tr>`).join('');
+  const motionRows=S.motions.map(m=>`<tr><td>${esc(m.ts)}</td><td>${esc(ML2[m.type]||m.type)}</td><td>${flag(m.prop)}${nm(m.prop)}</td><td>${[m.dur?esc(m.dur)+' min':'',m.spk?esc(m.spk)+'s/orador':''].filter(Boolean).join(' · ')||'—'}</td><td>${m.status==='approved'?'✓ Aprovada':m.status==='rejected'?'✕ Rejeitada':'Pendente'}</td></tr>`).join('');
 
   // Votes
   const voteBlocks=S.voteHistory.length? [...S.voteHistory].reverse().map(v=>{
-    const t=v.tally;
-    const detailRows=v.detail.map(d=>`<tr><td>${flag(d.c,d.f)}${nm(d.c)}</td><td>${voteLabel[d.v]||d.v}</td></tr>`).join('');
+    const t=v.tally || { fav: 0, fdr: 0, con: 0, cdr: 0, abs: 0 };
+    const detailRows=(v.detail||[]).map(d=>`<tr><td>${flag(d.c,d.f)}${nm(d.c)}</td><td>${esc(voteLabel[d.v]||d.v)}</td></tr>`).join('');
     return `<div class="vote-block">
-      <h3>${v.label} <span class="vtag ${v.approved?'ok':'no'}">${v.approved?'APROVADA':'NÃO APROVADA'}</span></h3>
-      <p class="vmeta">${v.t} · ${v.type==='procedimental'?'Procedimental':'Substancial'} · Maioria ${v.majority} (necessário: ${v.maj})</p>
-      <p class="vtotals">A Favor: <b>${t.fav}</b> · A Favor c/ Direito: <b>${t.fdr}</b> · Contra: <b>${t.con}</b> · Contra c/ Direito: <b>${t.cdr}</b> · Abstenções: <b>${t.abs}</b></p>
+      <h3>${esc(v.label)} <span class="vtag ${v.approved?'ok':'no'}">${v.approved?'APROVADA':'NÃO APROVADA'}</span></h3>
+      <p class="vmeta">${esc(v.t)} · ${v.type==='procedimental'?'Procedimental':'Substancial'} · Maioria ${esc(v.majority)} (necessário: ${Number(v.maj)||0})</p>
+      <p class="vtotals">A Favor: <b>${Number(t.fav)||0}</b> · A Favor c/ Direito: <b>${Number(t.fdr)||0}</b> · Contra: <b>${Number(t.con)||0}</b> · Contra c/ Direito: <b>${Number(t.cdr)||0}</b> · Abstenções: <b>${Number(t.abs)||0}</b></p>
       <table class="rtable"><thead><tr><th>${TR}</th><th>Voto</th></tr></thead><tbody>${detailRows}</tbody></table>
     </div>`;
   }).join('') : '<p class="empty-note">Nenhuma votação registrada nesta sessão.</p>';
 
-  const presenceRows=cc.map(c=>`<tr><td>${flag(c.c,c.f,c.i)}${nm(c.c)}${c.sub?' <span style=\'color:#9c958e;font-style:italic\'>('+c.sub+')</span>':''}</td><td>${presLabel[S.presence[c.c]]||'Ausente'}</td><td style="text-align:center">${S.speeches[c.c]||0}</td></tr>`).join('');
+  const presenceRows=cc.map(c=>`<tr><td>${flag(c.c,c.f,c.i)}${nm(c.c)}${c.sub?' <span style=\'color:#9c958e;font-style:italic\'>('+esc(c.sub)+')</span>':''}</td><td>${esc(presLabel[S.presence[c.c]]||'Ausente')}</td><td style="text-align:center">${Number(S.speeches[c.c])||0}</td></tr>`).join('');
 
   // Pending speakers list (the GSL queue at moment of report generation)
   const pendingSpeakers=S.speakers.length ? S.speakers.map((s,idx)=>{
@@ -1054,17 +1114,10 @@ function generateReport(){
     return `<tr style="${rowStyle}"><td style="text-align:center;color:#9c958e">${pos}º</td><td>${marker}${flag(s.c,s.f,s.i)}${nm(s.c)}${note}</td></tr>`;
   }).join('') : '';
 
-  const escapeHtmlAttr=(v)=>String(v??'')
-    .replace(/&/g,'&amp;')
-    .replace(/"/g,'&quot;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/'/g,'&#39;');
-  const appLogoSrc=escapeHtmlAttr((document.getElementById('app-logo')||{}).src||'');
+  const appLogoSrc=esc((document.getElementById('app-logo')||{}).src||'');
 
   const reportHTML=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Relatório — ${S.config.committee} — ${S.config.session}</title>
-<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<title>${isPartial?'Relatório parcial':'Relatório'} — ${esc(S.config.committee)} — ${esc(S.config.session)}</title>
 <style>
   @page { margin: 1.5cm; }
   * { box-sizing: border-box; }
@@ -1090,18 +1143,20 @@ function generateReport(){
   .empty-note { color:#9c958e; font-style: italic; }
   .rfoot { margin-top: 30px; padding-top: 12px; border-top:1px solid #e0dbd4; font-size: 11px; color:#9c958e; text-align:center; }
   @media print { body { padding: 0; } .noprint { display:none; } }
-  .printbtn { position: fixed; top: 16px; right: 16px; background:#8B1A1A; color:white; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   .material-icons { font-family: 'Material Icons'; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1; display: inline-block; text-transform: none; -webkit-font-smoothing: antialiased; vertical-align: middle; }
   .inline-icon { font-size: 14px !important; margin-right: 4px; vertical-align: middle; }
+  .live-note { display:inline-flex;align-items:center;gap:7px;background:#edf7f1;color:#145c30;border:1px solid #b9dfc8;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;margin-top:6px; }
+  .live-note::before { content:'';width:7px;height:7px;border-radius:50%;background:#2f9f5d;box-shadow:0 0 0 3px rgba(47,159,93,.14); }
 </style></head>
 <body>
-  <button class="printbtn noprint" onclick="window.print()"><span class="material-icons inline-icon">print</span>Imprimir / Salvar PDF</button>
+  <button class="printbtn noprint" onclick="window.print()">&#128424;&#65039; Imprimir / Salvar PDF</button>
   <div class="rhead">
     <img src="${appLogoSrc}" style="height:56px">
     <div>
-      <h1>${S.config.conference} — ${S.config.committee}</h1>
-      <p>${S.config.session} · Relatório gerado em ${now}</p>
-      <p>Agenda: ${S.agenda}</p>
+      <h1>${esc(S.config.conference)} — ${esc(S.config.committee)}</h1>
+      <p>${esc(S.config.session)} · Relatório gerado em ${now}</p>
+      <p>Agenda: ${esc(S.agenda)}</p>
+      ${isPartial?'<span class="live-note">Relatório parcial · atualização automática</span>':''}
     </div>
   </div>
 
@@ -1115,7 +1170,7 @@ function generateReport(){
   </div>
   <p style="font-size:13px">Maioria Simples: <b>${ms||'—'}</b> · Maioria Qualificada: <b>${mq||'—'}</b></p>
 
-  ${pendingSpeakers?`<h2>Lista de Oradores (ao Encerrar a Sessão)</h2>
+  ${pendingSpeakers?`<h2>Lista de Oradores (${isPartial?'em andamento':'ao Encerrar a Sessão'})</h2>
   <table class="rtable"><thead><tr><th style="text-align:center">#</th><th>${TR}</th></tr></thead><tbody>${pendingSpeakers}</tbody></table>
   <p style="font-size:12px;color:#6a635c">${S.speakers.length} orador(es) na fila · posição ${S.curIdx+1}º ao encerrar</p>`:''}
 
@@ -1140,13 +1195,19 @@ function generateReport(){
   <h2>Votações</h2>
   ${voteBlocks}
 
-  <div class="rfoot">Documento gerado automaticamente pelo Sim SD Chair · ${now}</div>
+  <div class="rfoot">${isPartial?'Relatório parcial atualizado automaticamente':'Documento gerado automaticamente pelo Sim SD Chair'} · ${now}</div>
 </body></html>`;
 
-  const w=window.open('','_blank');
+  return reportHTML;
+}
+
+// Generate a complete printable session report (save as PDF via print dialog)
+function generateReport(){
+  const reportHTML=buildReportHTML({type:'final'});
+  const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w=window.open(url,'_blank');
   if(!w){alert('Permita pop-ups para gerar o relatório.');return;}
-  w.document.write(reportHTML);
-  w.document.close();
 }
 
 function exportSessionJSON(){
@@ -1237,22 +1298,22 @@ function renderVote(){
     abs:{cls:'vt-abst',txt:'Abstenção'},
   };
   list.innerHTML=present.map(c=>{
-    const nm=dispName(c.c);
-    const sub=c.sub?` <span style="font-size:11px;color:var(--muted);font-style:italic">(${c.sub})</span>`:'';
+    const nm=escapeHtml(dispName(c.c));
+    const sub=c.sub?` <span style="font-size:11px;color:var(--muted);font-style:italic">(${escapeHtml(c.sub)})</span>`:'';
     // Abstention is allowed ONLY for nations declared just "Presente" (not "Presente Votante"),
     // and ONLY in substantive votes. Procedural votes never allow abstention.
     const canAbstain=isSubstancial && S.presence[c.c]==='presente';
     const v=S.votes[c.c];
-    const esc=JSON.stringify(c.c).slice(1,-1).replace(/'/g,"\\'");
-    if(v){const lv=voteLabels[v];return`<div class="v-row"><span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span><span class="vr-name">${nm}${sub}</span><span class="voted-tag ${lv.cls}">${lv.txt}</span><button class="vbtn vb-abst" onclick="castVote('${esc}',null)" style="font-size:10px;padding:2px 6px;margin-left:4px;display:inline-flex;align-items:center;"><span class="material-icons" style="font-size:11px;">undo</span></button></div>`;}
-    const abstainBtn=canAbstain?`<button class="vbtn vb-abst"   onclick="castVote('${esc}','abs')">Abst.</button>`:'';
+    const escCode=escapeAttr(JSON.stringify(c.c).slice(1,-1).replace(/'/g,"\\'"));
+    if(v){const lv=voteLabels[v];return`<div class="v-row"><span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span><span class="vr-name">${nm}${sub}</span><span class="voted-tag ${escapeAttr(lv.cls)}">${escapeHtml(lv.txt)}</span><button class="vbtn vb-abst" onclick="castVote('${escCode}',null)" style="font-size:10px;padding:2px 6px;margin-left:4px;display:inline-flex;align-items:center;"><span class="material-icons" style="font-size:11px;">undo</span></button></div>`;}
+    const abstainBtn=canAbstain?`<button class="vbtn vb-abst" onclick="castVote('${escCode}','abs')">Abst.</button>`:'';
     return`<div class="v-row">
       <span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span>
       <span class="vr-name">${nm}${sub}</span>
-      <button class="vbtn vb-fav"    onclick="castVote('${esc}','fav')">A Favor</button>
-      <button class="vbtn vb-fav-dr" onclick="castVote('${esc}','fdr')">A Favor c/ Dir.</button>
-      <button class="vbtn vb-con"    onclick="castVote('${esc}','con')">Contra</button>
-      <button class="vbtn vb-con-dr" onclick="castVote('${esc}','cdr')">Contra c/ Dir.</button>
+      <button class="vbtn vb-fav"    onclick="castVote('${escCode}','fav')">A Favor</button>
+      <button class="vbtn vb-fav-dr" onclick="castVote('${escCode}','fdr')">A Favor c/ Dir.</button>
+      <button class="vbtn vb-con"    onclick="castVote('${escCode}','con')">Contra</button>
+      <button class="vbtn vb-con-dr" onclick="castVote('${escCode}','cdr')">Contra c/ Dir.</button>
       ${abstainBtn}
     </div>`;
   }).join('');
@@ -1272,10 +1333,11 @@ function modPP(){
       if(S.mod.spkSec>0)S.mod.spkSec--;
       if(S.mod.totalSec>0)S.mod.totalSec--;
       if(S.mod.spkSec<=0||S.mod.totalSec<=0)modNext();
-      else updateModDisplay();
+      else{updateModDisplay();save();}
     },1000);}
+  save();
 }
-function modReset(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();}
+function modReset(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
 function modNext(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
 function renderModList(){
   // Current speaker = first in the mod queue (independent from the GSL list)
@@ -1297,7 +1359,7 @@ function renderModList(){
          data-idx="${i+1}">
       <span class="spk-num">${i+2}</span>
       <span class="spk-flag">${flagImg(s.c,s.f,null,19)}</span>
-      <span class="spk-name">${dispName(s.c)}</span>
+      <span class="spk-name">${escapeHtml(dispName(s.c))}</span>
       <button class="btn-rm" onclick="removeModSpk(${i+1})"><span class="material-icons" style="font-size:12px;">close</span></button>
       <span class="drag-handle material-icons" title="Arraste para reordenar">drag_indicator</span>
     </div>`).join('');
@@ -1311,9 +1373,10 @@ function updateUnmodDisplay(){document.getElementById('unmod-d').textContent=`${
 function unmodPP(){
   if(S.unmod.running){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';}
   else{S.unmod.running=true;document.getElementById('btn-unmod-pp').textContent='pause';
-    S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();},1000);}
+    S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();save();},1000);}
+  save();
 }
-function unmodReset(){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();}
+function unmodReset(){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    CAUCUS SETTINGS
@@ -1341,7 +1404,7 @@ function applyCaucus(){
    ══════════════════════════════════════════════════════ */
 function initSolo(){
   const sel=document.getElementById('solo-sel');
-  sel.innerHTML='<option value="">'+selectPrompt()+'</option>'+S.committeeCountries.map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  sel.innerHTML='<option value="">'+escapeHtml(selectPrompt())+'</option>'+S.committeeCountries.map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
   sel.onchange=()=>{
     const code=sel.value;
     if(!code){document.getElementById('solo-cur-row').style.display='none';return;}
@@ -1359,16 +1422,17 @@ function updateSoloDisplay(){const d=document.getElementById('solo-timer'),b=doc
 function soloPP(){
   if(S.solo.running){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';}
   else{S.solo.running=true;document.getElementById('btn-solo-pp').textContent='pause';
-    S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();},1000);}
+    S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();save();},1000);}
+  save();
 }
-function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();}
+function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    POPULATE SELECTS
    ══════════════════════════════════════════════════════ */
 function populateSelects(){
   const el=document.getElementById('mo-prop');
-  if(el)el.innerHTML='<option value="">'+(isCamaraCte()?'Representação...':'País...')+'</option>'+S.committeeCountries.map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  if(el)el.innerHTML='<option value="">'+(isCamaraCte()?'Representação...':'País...')+'</option>'+S.committeeCountries.map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
 }
 
 /* ══════════════════════════════════════════════════════
@@ -1395,23 +1459,94 @@ tickClock();
 /* ══════════════════════════════════════════════════════
    BOOT
    ══════════════════════════════════════════════════════ */
-load();
-document.getElementById('setup-logo').src='logo-alt.png';
-renderCountryGrid();
-if(S.setupDone){
-  document.getElementById('committee-screen').classList.add('hidden');
-  document.getElementById('setup-screen').classList.add('hidden');
-  document.getElementById('app-screen').classList.add('visible');
-  initApp();
-} else if(S.committeeKey){
-  // A committee was chosen but session not started — go straight to setup
-  document.getElementById('committee-screen').classList.add('hidden');
-  document.getElementById('setup-screen').classList.remove('hidden');
-  chooseCommittee(S.committeeKey);
-} else {
-  // Fresh start — show committee choice screen
+function showCurrentState(){
+  const committeeScreen=document.getElementById('committee-screen');
+  const setupScreen=document.getElementById('setup-screen');
+  const appScreen=document.getElementById('app-screen');
+  committeeScreen.classList.add('hidden');
+  setupScreen.classList.add('hidden');
+  appScreen.classList.remove('visible');
+  document.getElementById('setup-logo').src=LOGO_ALT_URL;
   document.getElementById('s-conf').value=S.config.conference;
   document.getElementById('s-session').value=S.config.session;
   document.getElementById('s-time').value=S.config.defaultTime;
   document.getElementById('s-warn').value=S.config.warnTime;
+
+  if(S.setupDone){
+    appScreen.classList.add('visible');
+    initApp();
+  }else if(S.committeeKey&&COMMITTEES[S.committeeKey]){
+    regionFilterActive=S.regionFilter||'all';
+    configureCommitteeSetup(COMMITTEES[S.committeeKey]);
+    document.querySelectorAll('.rpill').forEach(p=>p.classList.toggle('on',p.dataset.region===regionFilterActive));
+    renderCountryGrid();
+  }else{
+    committeeScreen.classList.remove('hidden');
+  }
 }
+
+function setRoomContext(roomId){
+  activeRoomId=roomId||null;
+}
+
+function startFreshRoom(committeeKey){
+  stopAll();
+  applyingRemoteState=true;
+  hydrateState(null);
+  if(committeeKey&&COMMITTEES[committeeKey]){
+    const cm=COMMITTEES[committeeKey];
+    S.committeeKey=committeeKey;
+    S.committeeType=cm.type;
+    S.config.committee=cm.name;
+  }
+  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  showCurrentState();
+  applyingRemoteState=false;
+}
+
+function applyRemoteState(snapshot){
+  if(!snapshot)return;
+  stopAll();
+  applyingRemoteState=true;
+  hydrateState(snapshot);
+  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  showCurrentState();
+  applyingRemoteState=false;
+}
+
+function reportHTMLForState(snapshot,options={}){
+  const previousState=S;
+  const previousApplying=applyingRemoteState;
+  try{
+    applyingRemoteState=true;
+    hydrateState(snapshot||{});
+    return buildReportHTML(options);
+  }finally{
+    S=previousState;
+    applyingRemoteState=previousApplying;
+  }
+}
+
+window.SimSDController={
+  snapshot:sessionSnapshot,
+  setRoomContext,
+  startFreshRoom,
+  applyRemoteState,
+  buildReportHTML:reportHTMLForState,
+};
+
+Object.assign(window,{
+  chooseCommittee,backToCommittee,renderCountryGrid,filterRegion,toggleSetup,
+  selectVisible,deselectAll,selectCSNU,selectALL193,startSession,goSetup,
+  encerrarSessao,resetSession,switchTab,inlineEdit,saveInline,openCfg,saveConfig,
+  openPanel,closePanel,gslPP,gslReset,gslStop,gslPreset,gslCustom,gslNext,
+  toggleYield,yieldToChair,yieldToCountry,clearHistory,addSpeaker,removeSpk,
+  dragStart,dragStartMod,dragOver,dragLeave,dragEnd,dropRow,dropRowMod,
+  addMotion,voteMotion,delMotion,setCustomName,concluirPresenca,setPresence,setAll,
+  exportCSV,registerVote,generateReport,exportSessionJSON,pickR,startVote,resetVote,
+  castVote,modPP,modReset,modNext,removeModSpk,unmodPP,unmodReset,openCaucus,
+  applyCaucus,soloPP,soloReset,renderRP,
+});
+
+load();
+showCurrentState();

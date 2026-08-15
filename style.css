@@ -1,10 +1,9 @@
-@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
-
 /* ════════════════════════════════════════
    RESET & TOKENS
 ════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
+#root, #react-app, .tab-component-host, .tab-component-root { display: contents; }
 
 :root {
   --red:        #8B1A1A;
