@@ -115,7 +115,7 @@ function broadcastPresence(roomId) {
 }
 
 function closeRoom(room, user) {
-  if (room.status === 'closed') return buildReport(room, 'final');
+  if (room.status === 'closed') return JSON.parse(db.prepare("SELECT payload FROM reports WHERE room_id=? AND report_type='final' ORDER BY id DESC LIMIT 1").get(room.id)?.payload || JSON.stringify(buildReport(room, 'final')));
   const endedAt = nowIso();
   db.prepare('UPDATE rooms SET status=\'closed\',ended_at=?,updated_at=? WHERE id=?').run(endedAt, endedAt, room.id);
   const closed = roomById(room.id);
