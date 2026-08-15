@@ -1,3 +1,16 @@
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(v) {
+  return escapeHtml(v);
+}
+
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
    ══════════════════════════════════════════════════════ */
@@ -230,19 +243,19 @@ function flagImg(country,flag,iso,size){
   const code=iso||isoOf(country)||'';
   const fb=flag||'🏳️';
   if(window.SimSDOfflineMode){
-    return `<span class="flag-emoji" style="font-size:${size}px">${fb}</span>`;
+    return `<span class="flag-emoji" style="font-size:${Number(size)}px">${escapeHtml(fb)}</span>`;
   }
   if(!code){
-    if(fb==='🏛️') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">account_balance</span>`;
-    if(fb==='🌐') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">public</span>`;
-    if(fb==='🏳️') return `<span class="material-icons" style="font-size:${size}px;vertical-align:middle;">flag</span>`;
-    return `<span class="flag-emoji" style="font-size:${size}px">${fb}</span>`;
+    if(fb==='🏛️') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">account_balance</span>`;
+    if(fb==='🌐') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">public</span>`;
+    if(fb==='🏳️') return `<span class="material-icons" style="font-size:${Number(size)}px;vertical-align:middle;">flag</span>`;
+    return `<span class="flag-emoji" style="font-size:${Number(size)}px">${escapeHtml(fb)}</span>`;
   }
   const w=Math.round(size*1.45);
-  const src=FLAG_OVERRIDE[code]||`https://flagcdn.com/h40/${code}.png`;
+  const src=FLAG_OVERRIDE[code]||`https://flagcdn.com/h40/${encodeURIComponent(code)}.png`;
   return `<img class="flagimg" src="${src}" `+
-    `data-fallback="${fb}" data-size="${size}" `+
-    `style="width:${w}px;height:${size}px;border-radius:3px;object-fit:cover;box-shadow:0 0 0 1px rgba(0,0,0,.08);vertical-align:middle">`;
+    `data-fallback="${escapeAttr(fb)}" data-size="${Number(size)}" `+
+    `style="width:${w}px;height:${Number(size)}px;border-radius:3px;object-fit:cover;box-shadow:0 0 0 1px rgba(0,0,0,.08);vertical-align:middle">`;
 }
 
 // Global, safe image-error fallback: replaces broken flag image with emoji span or Material Icon.
@@ -344,11 +357,12 @@ function renderCountryGrid(){
     return matchR&&matchS;
   });
   grid.innerHTML=filtered.map(c=>{
-    const sub=c.sub?`<small>${c.sub}</small>`:'';
+    const sub=c.sub?`<small>${escapeHtml(c.sub)}</small>`:'';
     const novote=isCamara&&!c.voto?'<span class="novote-tag">sem voto</span>':'';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
-    const label=c.disp||c.c;
-    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')" style="${isCamara?'min-height:46px':''}">
+    const label=escapeHtml(c.disp||c.c);
+    const safeCode=escapeAttr(c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
+    return `<div class="ctry-chip ${S.selectedSetup.has(c.c)?'sel':''}" onclick="toggleSetup('${safeCode}')" style="${isCamara?'min-height:46px':''}">
       <span class="cf">${flag}</span>
       <span class="cn">${label}${novote}${sub}</span>
     </div>`;
@@ -698,8 +712,8 @@ function toggleYield(){
   // populate yield country select (exclude current speaker)
   const cur=S.speakers[S.curIdx];
   const sel=document.getElementById('yield-country-sel');
-  sel.innerHTML='<option value="">'+selectPrompt()+'</option>'+
-    S.committeeCountries.filter(c=>!cur||c.c!==cur.c).map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  sel.innerHTML='<option value="">'+escapeHtml(selectPrompt())+'</option>'+
+    S.committeeCountries.filter(c=>!cur||c.c!==cur.c).map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
   box.style.display='';
 }
 // Records a finished speech. timeSpent = seconds actually spoken during this turn.
@@ -799,7 +813,7 @@ function renderSpeakers(){
   const cur=S.speakers[S.curIdx];
   document.getElementById('gsl-cur-flag').innerHTML=cur?flagImg(cur.c,cur.f,null,26):'<span class="material-icons" style="font-size:26px;vertical-align:middle;">account_balance</span>';
   document.getElementById('gsl-cur-name').textContent=cur?dispName(cur.c):'Nenhum orador';
-  document.getElementById('gsl-cur-meta').textContent=cur?`${S.speeches[cur.c]||0} discurso(s) nesta sessão`:'';
+  document.getElementById('gsl-cur-meta').textContent=cur?`${Number(S.speeches[cur.c])||0} discurso(s) nesta sessão`:'';
   document.getElementById('queue-badge').textContent=Math.max(0,S.speakers.length-1);
   const list=document.getElementById('gsl-list');
   if(S.speakers.length<=1){list.innerHTML='<div class="empty"><div class="empty-icon material-icons">reorder</div><div class="empty-txt" id="empty-add-txt">Clique à direita para adicionar</div></div>';return;}
@@ -813,8 +827,8 @@ function renderSpeakers(){
          data-idx="${i+1}">
       <span class="spk-num">${i+2}</span>
       <span class="spk-flag">${flagImg(s.c,s.f,null,19)}</span>
-      <span class="spk-name">${dispName(s.c)}</span>
-      <span class="spk-speech-count">${S.speeches[s.c]||0} disc.</span>
+      <span class="spk-name">${escapeHtml(dispName(s.c))}</span>
+      <span class="spk-speech-count">${Number(S.speeches[s.c])||0} disc.</span>
       <button class="btn-rm" onclick="removeSpk(${i+1})"><span class="material-icons" style="font-size:12px;">close</span></button>
       <span class="drag-handle material-icons" title="Arraste para reordenar">drag_indicator</span>
     </div>`).join('');
@@ -824,13 +838,13 @@ function renderHistory(){
   if(!S.history.length){el.innerHTML='<div class="empty" style="padding:.75rem"><div class="empty-txt">Nenhum discurso ainda</div></div>';return;}
   el.innerHTML=S.history.map(h=>{
     let tags='';
-    if(h.received)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);background:var(--green-pale);border:1px solid var(--green-mid);border-radius:9px;padding:1px 6px">recebeu de ${flagImg(h.received,h.receivedFlag,null,12)} ${h.received}</span>`;
+    if(h.received)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);background:var(--green-pale);border:1px solid var(--green-mid);border-radius:9px;padding:1px 6px">recebeu de ${flagImg(h.received,h.receivedFlag,null,12)} ${escapeHtml(h.received)}</span>`;
     if(h.yielded==='chair')tags+=`<span style="font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu ao Chair</span>`;
-    else if(h.yielded)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu a ${flagImg(h.yielded,h.yieldedFlag,null,12)} ${h.yielded}</span>`;
+    else if(h.yielded)tags+=`<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:9px;padding:1px 6px">cedeu a ${flagImg(h.yielded,h.yieldedFlag,null,12)} ${escapeHtml(h.yielded)}</span>`;
     return `<div class="hist-row">
-      <span class="hist-time">${h.t}</span>
+      <span class="hist-time">${escapeHtml(h.t)}</span>
       <span style="display:inline-flex;align-items:center">${flagImg(h.c,h.f,null,17)}</span>
-      <span style="font-size:13px;font-weight:500">${dispName(h.c)}</span>
+      <span style="font-size:13px;font-weight:500">${escapeHtml(dispName(h.c))}</span>
       <span style="display:inline-flex;gap:4px">${tags}</span>
       <span style="margin-left:auto;font-size:11px;color:var(--muted2)">${h.sec>0?fmt(h.sec)+' falados':'0:00'}</span>
     </div>`;
@@ -849,12 +863,13 @@ function renderRP(){
   const el=document.getElementById('rp-list');if(!el)return;
   el.innerHTML=list.map(c=>{
     const added=inList.has(c.c);
-    const count=S.speeches[c.c]||0;
+    const count=Number(S.speeches[c.c])||0;
     const isCamara=S.committeeType==='camara';
     const flag=isCamara?flagImg(c.c,'🏛️',null,16):flagImg(c.c,c.f,c.i,16);
-    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${c.c.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
+    const safeCode=escapeAttr(c.c.replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+    return `<div class="c-opt ${added?'dim':''}" onclick="addSpeaker('${safeCode}')">
       <span class="c-opt-flag">${flag}</span>
-      <span class="c-opt-name">${dispName(c.c)}</span>
+      <span class="c-opt-name">${escapeHtml(dispName(c.c))}</span>
       <span class="c-opt-count">${count}</span>
     </div>`;
   }).join('');
@@ -886,16 +901,16 @@ function renderMotions(){
   }
   el.innerHTML=S.motions.map(m=>`
     <div class="mo-item">
-      <span class="mo-badge ${MC[m.type]||'mt-other'}">${ML[m.type]||m.type}</span>
+      <span class="mo-badge ${escapeAttr(MC[m.type]||'mt-other')}">${escapeHtml(ML[m.type]||m.type)}</span>
       <div class="mo-info">
-        <div class="mo-prop">${dispName(m.prop)} <span style="font-size:11px;color:var(--muted2);font-weight:400">${m.ts}</span></div>
-        <div class="mo-det">${[m.dur?m.dur+' min':'',m.spk?m.spk+'s/orador':''].filter(Boolean).join(' · ')||''}</div>
+        <div class="mo-prop">${escapeHtml(dispName(m.prop))} <span style="font-size:11px;color:var(--muted2);font-weight:400">${escapeHtml(m.ts)}</span></div>
+        <div class="mo-det">${[m.dur?escapeHtml(m.dur)+' min':'',m.spk?escapeHtml(m.spk)+'s/orador':''].filter(Boolean).join(' · ')||''}</div>
       </div>
       ${m.status==='pending'?`
-        <button class="btn-app" onclick="voteMotion('${m.id}','approved')"><span class="material-icons inline-icon">check</span>Aprovar</button>
-        <button class="btn-rej" onclick="voteMotion('${m.id}','rejected')"><span class="material-icons inline-icon">close</span>Rejeitar</button>`
+        <button class="btn-app" onclick="voteMotion('${escapeAttr(m.id)}','approved')"><span class="material-icons inline-icon">check</span>Aprovar</button>
+        <button class="btn-rej" onclick="voteMotion('${escapeAttr(m.id)}','rejected')"><span class="material-icons inline-icon">close</span>Rejeitar</button>`
       :`<span class="mo-done ${m.status==='approved'?'mo-app-done':'mo-rej-done'}">${m.status==='approved'?`<span class="material-icons inline-icon">check</span>Aprovada`:`<span class="material-icons inline-icon">close</span>Rejeitada`}</span>`}
-      <button onclick="delMotion('${m.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:3px 5px;border-radius:4px;transition:color .15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'"><span class="material-icons" style="font-size:16px;">close</span></button>
+      <button onclick="delMotion('${escapeAttr(m.id)}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:3px 5px;border-radius:4px;transition:color .15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'"><span class="material-icons" style="font-size:16px;">close</span></button>
     </div>`).join('');
 }
 
@@ -933,18 +948,18 @@ function renderPresence(){
   tbody.innerHTML=cc.map(c=>{
     const s=S.presence[c.c]||'ausente';
     const canVote=c.voto!==false;
-    const esc=c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+    const escCode=escapeAttr(c.c.replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
     const votanteOpt=canVote?`<option value="presente-votante" ${s==='presente-votante'?'selected':''}>Pres. Votante</option>`:'';
-    const statusSel=`<select class="psel ps-${s.replace(' ','-')}" onchange="setPresence('${esc}',this.value,this)">
+    const statusSel=`<select class="psel ps-${escapeAttr(s.replace(' ','-'))}" onchange="setPresence('${escCode}',this.value,this)">
         <option value="presente" ${s==='presente'?'selected':''}>Presente</option>
         ${votanteOpt}
         <option value="ausente" ${s==='ausente'?'selected':''}>Ausente</option>
       </select>`;
     if(isCamara){
       const noVote=!canVote?' <span class="novote-tag" style="background:var(--bg);color:var(--muted);font-size:9px;border-radius:8px;padding:0 6px">sem voto</span>':'';
-      const nameCell=`<span class="rep-name">${dispName(c.c)}</span>`;
+      const nameCell=`<span class="rep-name">${escapeHtml(dispName(c.c))}</span>`;
       return`<tr>
-        <td><div class="rep-cell">${nameCell}${noVote}<div class="rep-sub">${c.sub||''}</div></div></td>
+        <td><div class="rep-cell">${nameCell}${noVote}<div class="rep-sub">${escapeHtml(c.sub||'')}</div></div></td>
         <td>${statusSel}</td>
       </tr>`;
     }
@@ -952,7 +967,7 @@ function renderPresence(){
     const noVote=!canVote?' <span class="novote-tag" style="background:var(--bg);color:var(--muted);font-size:9px;border-radius:8px;padding:0 6px">sem voto</span>':'';
     return`<tr>
       <td>${flagImg(c.c,c.f,c.i,20)}</td>
-      <td><div class="rep-cell"><span class="rep-name">${dispName(c.c)}${noVote}</span><div class="rep-sub">${info}</div></div></td>
+      <td><div class="rep-cell"><span class="rep-name">${escapeHtml(dispName(c.c))}${noVote}</span><div class="rep-sub">${escapeHtml(info)}</div></div></td>
       <td>${statusSel}</td>
     </tr>`;
   }).join('');
@@ -1128,7 +1143,6 @@ function buildReportHTML(options={}){
   .empty-note { color:#9c958e; font-style: italic; }
   .rfoot { margin-top: 30px; padding-top: 12px; border-top:1px solid #e0dbd4; font-size: 11px; color:#9c958e; text-align:center; }
   @media print { body { padding: 0; } .noprint { display:none; } }
-  .printbtn { position: fixed; top: 16px; right: 16px; background:#8B1A1A; color:white; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   .material-icons { font-family: 'Material Icons'; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1; display: inline-block; text-transform: none; -webkit-font-smoothing: antialiased; vertical-align: middle; }
   .inline-icon { font-size: 14px !important; margin-right: 4px; vertical-align: middle; }
   .live-note { display:inline-flex;align-items:center;gap:7px;background:#edf7f1;color:#145c30;border:1px solid #b9dfc8;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;margin-top:6px; }
@@ -1190,10 +1204,10 @@ function buildReportHTML(options={}){
 // Generate a complete printable session report (save as PDF via print dialog)
 function generateReport(){
   const reportHTML=buildReportHTML({type:'final'});
-  const w=window.open('','_blank');
+  const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w=window.open(url,'_blank');
   if(!w){alert('Permita pop-ups para gerar o relatório.');return;}
-  w.document.write(reportHTML);
-  w.document.close();
 }
 
 function exportSessionJSON(){
@@ -1284,22 +1298,22 @@ function renderVote(){
     abs:{cls:'vt-abst',txt:'Abstenção'},
   };
   list.innerHTML=present.map(c=>{
-    const nm=dispName(c.c);
-    const sub=c.sub?` <span style="font-size:11px;color:var(--muted);font-style:italic">(${c.sub})</span>`:'';
+    const nm=escapeHtml(dispName(c.c));
+    const sub=c.sub?` <span style="font-size:11px;color:var(--muted);font-style:italic">(${escapeHtml(c.sub)})</span>`:'';
     // Abstention is allowed ONLY for nations declared just "Presente" (not "Presente Votante"),
     // and ONLY in substantive votes. Procedural votes never allow abstention.
     const canAbstain=isSubstancial && S.presence[c.c]==='presente';
     const v=S.votes[c.c];
-    const esc=JSON.stringify(c.c).slice(1,-1).replace(/'/g,"\\'");
-    if(v){const lv=voteLabels[v];return`<div class="v-row"><span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span><span class="vr-name">${nm}${sub}</span><span class="voted-tag ${lv.cls}">${lv.txt}</span><button class="vbtn vb-abst" onclick="castVote('${esc}',null)" style="font-size:10px;padding:2px 6px;margin-left:4px;display:inline-flex;align-items:center;"><span class="material-icons" style="font-size:11px;">undo</span></button></div>`;}
-    const abstainBtn=canAbstain?`<button class="vbtn vb-abst"   onclick="castVote('${esc}','abs')">Abst.</button>`:'';
+    const escCode=escapeAttr(JSON.stringify(c.c).slice(1,-1).replace(/'/g,"\\'"));
+    if(v){const lv=voteLabels[v];return`<div class="v-row"><span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span><span class="vr-name">${nm}${sub}</span><span class="voted-tag ${escapeAttr(lv.cls)}">${escapeHtml(lv.txt)}</span><button class="vbtn vb-abst" onclick="castVote('${escCode}',null)" style="font-size:10px;padding:2px 6px;margin-left:4px;display:inline-flex;align-items:center;"><span class="material-icons" style="font-size:11px;">undo</span></button></div>`;}
+    const abstainBtn=canAbstain?`<button class="vbtn vb-abst" onclick="castVote('${escCode}','abs')">Abst.</button>`:'';
     return`<div class="v-row">
       <span style="display:inline-flex;align-items:center">${flagImg(c.c,c.f,c.i,19)}</span>
       <span class="vr-name">${nm}${sub}</span>
-      <button class="vbtn vb-fav"    onclick="castVote('${esc}','fav')">A Favor</button>
-      <button class="vbtn vb-fav-dr" onclick="castVote('${esc}','fdr')">A Favor c/ Dir.</button>
-      <button class="vbtn vb-con"    onclick="castVote('${esc}','con')">Contra</button>
-      <button class="vbtn vb-con-dr" onclick="castVote('${esc}','cdr')">Contra c/ Dir.</button>
+      <button class="vbtn vb-fav"    onclick="castVote('${escCode}','fav')">A Favor</button>
+      <button class="vbtn vb-fav-dr" onclick="castVote('${escCode}','fdr')">A Favor c/ Dir.</button>
+      <button class="vbtn vb-con"    onclick="castVote('${escCode}','con')">Contra</button>
+      <button class="vbtn vb-con-dr" onclick="castVote('${escCode}','cdr')">Contra c/ Dir.</button>
       ${abstainBtn}
     </div>`;
   }).join('');
@@ -1345,7 +1359,7 @@ function renderModList(){
          data-idx="${i+1}">
       <span class="spk-num">${i+2}</span>
       <span class="spk-flag">${flagImg(s.c,s.f,null,19)}</span>
-      <span class="spk-name">${dispName(s.c)}</span>
+      <span class="spk-name">${escapeHtml(dispName(s.c))}</span>
       <button class="btn-rm" onclick="removeModSpk(${i+1})"><span class="material-icons" style="font-size:12px;">close</span></button>
       <span class="drag-handle material-icons" title="Arraste para reordenar">drag_indicator</span>
     </div>`).join('');
@@ -1390,7 +1404,7 @@ function applyCaucus(){
    ══════════════════════════════════════════════════════ */
 function initSolo(){
   const sel=document.getElementById('solo-sel');
-  sel.innerHTML='<option value="">'+selectPrompt()+'</option>'+S.committeeCountries.map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  sel.innerHTML='<option value="">'+escapeHtml(selectPrompt())+'</option>'+S.committeeCountries.map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
   sel.onchange=()=>{
     const code=sel.value;
     if(!code){document.getElementById('solo-cur-row').style.display='none';return;}
@@ -1418,7 +1432,7 @@ function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getE
    ══════════════════════════════════════════════════════ */
 function populateSelects(){
   const el=document.getElementById('mo-prop');
-  if(el)el.innerHTML='<option value="">'+(isCamaraCte()?'Representação...':'País...')+'</option>'+S.committeeCountries.map(c=>`<option value="${c.c}">${isCamaraCte()?'':c.f+' '}${dispName(c.c)}${c.sub?' ('+c.sub+')':''}</option>`).join('');
+  if(el)el.innerHTML='<option value="">'+(isCamaraCte()?'Representação...':'País...')+'</option>'+S.committeeCountries.map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
 }
 
 /* ══════════════════════════════════════════════════════

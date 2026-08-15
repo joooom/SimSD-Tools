@@ -61,9 +61,9 @@ function AdminDashboard({ onClose }) {
   const openReport = (room, type) => {
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) { setError('Permita pop-ups para abrir o relatório.'); return; }
-    reportWindow.document.write('<!doctype html><title>Carregando relatório…</title><p style="font-family:Calibri;padding:24px">Carregando relatório…</p>');
-    reportWindow.document.close();
+    reportWindow.document.title = 'Carregando relatório…';
     let updating = false;
+    let prevBlobUrl = null;
     const update = async () => {
       if (reportWindow.closed || updating) return;
       updating = true;
@@ -71,19 +71,13 @@ function AdminDashboard({ onClose }) {
         const data = await api(`/api/admin/rooms/${room.id}/report?type=${type}`);
         const html = window.SimSDController?.buildReportHTML(data.state, { type, room: data.room });
         if (!html) throw new Error('Gerador de relatório indisponível.');
-        const x = reportWindow.scrollX, y = reportWindow.scrollY;
-        reportWindow.document.open(); reportWindow.document.write(html); reportWindow.document.close();
-        reportWindow.scrollTo(x, y);
-        if (type === 'partial' && data.room.status === 'closed') reportWindow.document.title = `Relatório parcial encerrado — ${room.name}`;
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        reportWindow.location.replace(blobUrl);
+        if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
+        prevBlobUrl = blobUrl;
       } catch (err) {
         setError(err.message);
-        if (!reportWindow.closed) {
-          reportWindow.document.body.replaceChildren();
-          const message = reportWindow.document.createElement('p');
-          message.style.cssText = 'font-family:Calibri;padding:24px;color:#8b1a1a';
-          message.textContent = err.message;
-          reportWindow.document.body.append(message);
-        }
       } finally { updating = false; }
     };
     update();

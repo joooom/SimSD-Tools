@@ -5,7 +5,7 @@ const OAUTH_BASE = process.env.SIMSD_OAUTH_BASE_URL || 'https://simsd.sdomingos.
 const CLIENT_ID = process.env.SIMSD_OAUTH_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.SIMSD_OAUTH_CLIENT_SECRET || '';
 const REDIRECT_URI = process.env.SIMSD_OAUTH_REDIRECT_URI || '';
-const COOKIE_SECURE = process.env.NODE_ENV === 'production' || process.env.SIMSD_COOKIE_SECURE === '1';
+const COOKIE_SECURE = process.env.SIMSD_COOKIE_SECURE !== '0';
 
 export const SESSION_COOKIE = 'simsd_session';
 const FLOW_COOKIE = 'simsd_oauth_state';
@@ -19,10 +19,9 @@ function base64url(bytes) {
 }
 
 function cookie(name, value, options = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
-  if (COOKIE_SECURE) parts.push('Secure');
-  if (options.maxAge !== undefined) parts.push(`Max-Age=${options.maxAge}`);
-  return parts.join('; ');
+  const securePart = COOKIE_SECURE ? '; Secure' : '';
+  const maxAgePart = options.maxAge !== undefined ? `; Max-Age=${options.maxAge}` : '';
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax${securePart}${maxAgePart}`;
 }
 
 function appendCookie(res, value) {
@@ -54,7 +53,8 @@ export function beginOAuth(res) {
     response_type: 'code', client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
     scope: 'profile email', state, code_challenge: challenge, code_challenge_method: 'S256',
   }).toString();
-  res.writeHead(302, { Location: url.toString(), 'Set-Cookie': cookie(FLOW_COOKIE, state, { maxAge: 300 }) });
+  appendCookie(res, cookie(FLOW_COOKIE, state, { maxAge: 300 }));
+  res.writeHead(302, { Location: url.toString() });
   res.end();
 }
 
