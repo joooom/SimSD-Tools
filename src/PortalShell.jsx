@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { sessionSync } from './sessionSync.js';
 import logoUrl from '../logo.png';
 import './collaboration.css';
@@ -172,11 +173,15 @@ function RoomBar({ room, user, onLeave }) {
     document.body.classList.toggle('room-readonly', status === 'closed');
     return () => document.body.classList.remove('room-readonly');
   }, [status]);
-  return <><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
+  const content = <><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
+  const slot = document.getElementById('room-bar-slot');
+  return slot ? createPortal(content, slot) : content;
 }
 
 function VisitorBar({ onExit }) {
-  return <div className="room-bar visitor-bar"><span className="material-icons visitor-icon">person_outline</span><div><strong>Modo visitante</strong><small>Offline · dados salvos somente neste dispositivo</small></div><button onClick={onExit}>Sair do modo visitante</button></div>;
+  const content = <div className="room-bar visitor-bar"><span className="material-icons visitor-icon">person_outline</span><div><strong>Modo visitante</strong><small>Offline · dados salvos somente neste dispositivo</small></div><button onClick={onExit}>Sair do modo visitante</button></div>;
+  const slot = document.getElementById('room-bar-slot');
+  return slot ? createPortal(content, slot) : content;
 }
 
 export default function PortalShell() {

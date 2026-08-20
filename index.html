@@ -226,13 +226,13 @@
     <input id="tb-session-inp" class="topbar-inline-inp" type="text" style="display:none;width:140px"
       onblur="saveInline('session')" onkeydown="if(event.key==='Enter')saveInline('session')">
     <span class="status-pill" id="status-pill">Lista de Discursos</span>
+    <div id="room-bar-slot" style="display:contents"></div>
     <div class="topbar-right">
       <div class="official-clock" title="Horário oficial">
         <span class="material-icons clock-icon" style="font-size:15px;">schedule</span>
         <span id="official-clock-time">--:--:--</span>
       </div>
       <div class="majority-bar">
-        <div class="mb-item"><div class="mb-lbl">MS</div><div class="mb-num" id="mb-ms">—</div></div>
         <div class="mb-sep"></div>
         <div class="mb-item"><div class="mb-lbl">MQ</div><div class="mb-num" id="mb-mq">—</div></div>
         <div class="mb-sep"></div>
