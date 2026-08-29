@@ -816,6 +816,9 @@ select.m-inp { cursor: pointer; }
 .ptable td { padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .ptable tr:last-child td { border-bottom: none; }
 .ptable tr:hover td { background: var(--red-pale); }
+.ptable .presence-flag-col,
+.ptable .presence-flag { width: 1%; padding-right: 4px; white-space: nowrap; }
+.ptable .presence-country { padding-left: 4px; }
 .psel { background: white; border: 1px solid var(--border2); border-radius: 6px; padding: 4px 7px; font-size: 12px; font-family: Candara,Calibri,sans-serif; cursor: pointer; outline: none; transition: all .15s; font-weight: 600; }
 .psel:focus { border-color: var(--red); }
 .ps-presente { color: var(--green); border-color: var(--green-mid); background: var(--green-pale); }

@@ -24,7 +24,7 @@ const markup = `
         <div style="flex:1;overflow-y:auto;padding:0 .875rem .875rem;min-height:0">
           <div class="pres-card">
             <table class="ptable">
-              <thead id="pres-thead"><tr><th></th><th>País</th><th>Delegado</th><th>Status</th></tr></thead>
+              <thead id="pres-thead"><tr><th class="presence-flag-col"></th><th class="presence-country">País</th><th>Status</th></tr></thead>
               <tbody id="pres-tbody"></tbody>
             </table>
           </div>

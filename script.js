@@ -643,9 +643,7 @@ function updateMajority(){
   const countries=S.committeeCountries;
   // Only members WITH voting rights count toward majority/quorum
   const tot=countries.filter(c=>S.presence[c.c]!=='ausente' && c.voto!==false).length;
-  const ms=tot>0?Math.floor(tot/2)+1:0;
   const mq=tot>0?Math.ceil(tot*2/3):0;
-  document.getElementById('mb-ms').textContent=tot>0?ms:'—';
   document.getElementById('mb-mq').textContent=tot>0?mq:'—';
   document.getElementById('mb-tot').textContent=tot;
 }
@@ -934,7 +932,6 @@ function renderPresence(){
   document.getElementById('ps-aus').textContent=aus;
   document.getElementById('q-ms').textContent=tot>0?ms:'—';
   document.getElementById('q-mq').textContent=tot>0?mq:'—';
-  document.getElementById('mb-ms').textContent=tot>0?ms:'—';
   document.getElementById('mb-mq').textContent=tot>0?mq:'—';
   document.getElementById('mb-tot').textContent=tot;
   // Header: Câmara uses a single "Representação" column (name + subtitle stacked)
@@ -942,7 +939,7 @@ function renderPresence(){
   if(thead){
     thead.innerHTML=isCamara
       ? '<tr><th>Representação</th><th>Status</th></tr>'
-      : '<tr><th></th><th>País</th><th>Status</th></tr>';
+      : '<tr><th class="presence-flag-col"></th><th class="presence-country">País</th><th>Status</th></tr>';
   }
   const tbody=document.getElementById('pres-tbody');if(!tbody)return;
   tbody.innerHTML=cc.map(c=>{
@@ -966,8 +963,8 @@ function renderPresence(){
     const info=c.sub||c.delegate||'';
     const noVote=!canVote?' <span class="novote-tag" style="background:var(--bg);color:var(--muted);font-size:9px;border-radius:8px;padding:0 6px">sem voto</span>':'';
     return`<tr>
-      <td>${flagImg(c.c,c.f,c.i,20)}</td>
-      <td><div class="rep-cell"><span class="rep-name">${escapeHtml(dispName(c.c))}${noVote}</span><div class="rep-sub">${escapeHtml(info)}</div></div></td>
+      <td class="presence-flag">${flagImg(c.c,c.f,c.i,20)}</td>
+      <td class="presence-country"><div class="rep-cell"><span class="rep-name">${escapeHtml(dispName(c.c))}${noVote}</span><div class="rep-sub">${escapeHtml(info)}</div></div></td>
       <td>${statusSel}</td>
     </tr>`;
   }).join('');
