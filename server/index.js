@@ -163,6 +163,7 @@ async function handleApi(req, res, url) {
     const validCommittees = ['camara', 'unodc', 'oea', 'unesco'];
     const committeeKey = validCommittees.includes(rawCommittee) ? rawCommittee : null;
     if (!committeeKey) throw Object.assign(new Error('Comitê inválido.'), { status: 400 });
+    const now = nowIso();
     const room = { id: randomUUID(), code: generateRoomCode(), name, committeeKey };
     db.prepare(`INSERT INTO rooms(id,code,name,committee_key,owner_user_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?)`)
       .run(room.id, room.code, room.name, room.committeeKey, user.id, now, now);
@@ -290,6 +291,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/auth/login') return beginOAuth(res);
     if (url.pathname === '/auth/callback') return await finishOAuth(req, res, url);
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
+    if (url.pathname === '/ws') return sendJson(res, 426, { error: 'upgrade_required', message: 'Conexão WebSocket necessária.' });
     return serveStatic(res, url);
   } catch (error) {
     const status = error.status || 500;
