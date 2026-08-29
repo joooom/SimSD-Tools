@@ -169,6 +169,11 @@
       <button class="btn-report" style="margin-top:.625rem" onclick="exportSessionJSON()"><span class="material-icons inline-icon">download</span>Exportar Sessão (JSON)</button>
       <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Exporta todos os dados brutos da sessão (oradores, presença, moções, histórico, votos) em formato JSON.</div>
     </div>
+    <div style="border-top:1px solid var(--border);margin-top:.875rem;padding-top:.875rem" id="cfg-viewer-sec">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:.5rem">Modo Espectador</div>
+      <button class="btn-primary" id="btn-viewer-mode" onclick="openViewerMode()" style="width:100%"><span class="material-icons inline-icon">desktop_windows</span>Abrir Modo Espectador</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:.375rem;line-height:1.4">Abre uma aba sincronizada para exibição em projetor ou TV (somente visualização).</div>
+    </div>
     <div style="border-top:1px solid var(--border);margin-top:.875rem;padding-top:.875rem">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:.5rem">Encerramento</div>
       <button class="btn-report" style="background:var(--green,#3a6b1a);color:#fff;border-color:var(--green,#3a6b1a)" onclick="encerrarSessao()"><span class="material-icons inline-icon">power_settings_new</span>Encerrar a Sessão</button>

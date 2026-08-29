@@ -107,7 +107,7 @@ function broadcast(roomId, payload, except = null) {
 }
 
 function broadcastPresence(roomId) {
-  const clients = [...(socketsByRoom.get(roomId) || [])].filter(socket => socket.readyState === WebSocket.OPEN);
+  const clients = [...(socketsByRoom.get(roomId) || [])].filter(socket => socket.readyState === WebSocket.OPEN && !socket.simsdViewer);
   broadcast(roomId, {
     type: 'presence', count: clients.length,
     users: clients.map(socket => ({ id: socket.simsdUser.id, name: socket.simsdUser.name, role: socket.simsdUser.role })),
@@ -307,12 +307,16 @@ server.on('upgrade', (req, socket, head) => {
     if (url.pathname !== '/ws') return socket.destroy();
     const origin = req.headers.origin;
     if (origin && new URL(origin).host !== req.headers.host) return socket.destroy();
-    const user = requireUser(req);
+    const isViewer = url.searchParams.get('mode') === 'viewer';
+    const user = getAuthenticatedUser(req);
+    if (!isViewer && !user) return socket.destroy();
     const room = roomById(url.searchParams.get('roomId'));
-    if (!room || !canAccessRoom(room, user)) return socket.destroy();
+    if (!room) return socket.destroy();
+    if (!isViewer && !canAccessRoom(room, user)) return socket.destroy();
     wss.handleUpgrade(req, socket, head, ws => {
-      ws.simsdUser = user;
+      ws.simsdUser = user || { id: 'viewer', name: 'Espectador', role: 'viewer' };
       ws.simsdRoomId = room.id;
+      ws.simsdViewer = isViewer;
       wss.emit('connection', ws, req, room);
     });
   } catch { socket.destroy(); }
@@ -331,6 +335,7 @@ wss.on('connection', (ws, _req, room) => {
     try {
       const message = JSON.parse(raw.toString());
       if (message.type !== 'state:update') return;
+      if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.' }));
       const current = roomById(room.id);
       if (!current || current.status !== 'open') return ws.send(JSON.stringify({ type: 'error', message: 'A sala está encerrada.' }));
       if (Number(message.baseVersion) !== current.state_version) {

@@ -12,6 +12,8 @@ import VotingTab from './tabs/VotingTab.jsx';
 import PresenceTab from './tabs/PresenceTab.jsx';
 import PortalShell from './PortalShell.jsx';
 
+import ViewerApp from './ViewerApp.jsx';
+
 function SimSDApp() {
   const markup = document.getElementById('app-template').innerHTML;
   return (
@@ -24,30 +26,37 @@ function SimSDApp() {
 }
 
 const root = createRoot(document.getElementById('root'));
-flushSync(() => root.render(<SimSDApp />));
+const urlParams = new URLSearchParams(window.location.search);
+if (window.location.pathname === '/viewer') {
+  document.body.classList.add('viewer-mode');
+  flushSync(() => root.render(<ViewerApp roomId={urlParams.get('roomId')} />));
+} else {
+  flushSync(() => root.render(<SimSDApp />));
 
-const tabs = [
-  ['tab-gsl-root', GslTab],
-  ['tab-motions-root', MotionsTab],
-  ['tab-mod-root', ModeratedTab],
-  ['tab-unmod-root', UnmoderatedTab],
-  ['tab-solo-root', SoloSpeakerTab],
-  ['tab-vote-root', VotingTab],
-  ['tab-presence-root', PresenceTab],
-];
+  const tabs = [
+    ['tab-gsl-root', GslTab],
+    ['tab-motions-root', MotionsTab],
+    ['tab-mod-root', ModeratedTab],
+    ['tab-unmod-root', UnmoderatedTab],
+    ['tab-solo-root', SoloSpeakerTab],
+    ['tab-vote-root', VotingTab],
+    ['tab-presence-root', PresenceTab],
+  ];
 
-for (const [hostId, TabComponent] of tabs) {
-  const tabRoot = createRoot(document.getElementById(hostId));
-  flushSync(() => tabRoot.render(<TabComponent />));
+  for (const [hostId, TabComponent] of tabs) {
+    const tabRoot = createRoot(document.getElementById(hostId));
+    flushSync(() => tabRoot.render(<TabComponent />));
+  }
+
+  await import('../script.js');
+
+  const portalRoot = createRoot(document.getElementById('portal-root'));
+  portalRoot.render(<PortalShell />);
+
+  if ('serviceWorker' in navigator) {
+    const registerOfflineShell = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
+    if (document.readyState === 'complete') registerOfflineShell();
+    else window.addEventListener('load', registerOfflineShell, { once: true });
+  }
 }
 
-await import('../script.js');
-
-const portalRoot = createRoot(document.getElementById('portal-root'));
-portalRoot.render(<PortalShell />);
-
-if ('serviceWorker' in navigator) {
-  const registerOfflineShell = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
-  if (document.readyState === 'complete') registerOfflineShell();
-  else window.addEventListener('load', registerOfflineShell, { once: true });
-}

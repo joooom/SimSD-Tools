@@ -16,12 +16,14 @@ class SessionSync {
     for (const listener of this.listeners) listener(event);
   }
 
-  open(room) {
+  open(room, options = {}) {
     this.close();
     this.room = room;
     window.SimSDController?.setRoomContext(room.id);
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.socket = new WebSocket(`${protocol}//${location.host}/ws?roomId=${encodeURIComponent(room.id)}`);
+    let wsUrl = `${protocol}//${location.host}/ws?roomId=${encodeURIComponent(room.id)}`;
+    if (options.mode) wsUrl += `&mode=${encodeURIComponent(options.mode)}`;
+    this.socket = new WebSocket(wsUrl);
     this.emit({ type: 'status', status: 'connecting' });
     this.socket.addEventListener('open', () => this.emit({ type: 'status', status: 'connected' }));
     this.socket.addEventListener('close', () => this.emit({ type: 'status', status: 'disconnected' }));
