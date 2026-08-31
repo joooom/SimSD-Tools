@@ -3,7 +3,7 @@ import { sessionSync } from './sessionSync.js';
 import { dispName, flagImg } from './utils/flags.js';
 import './viewer.css';
 
-import logoAlt from '../logo-alt.png';
+const logoAlt = '/simsd-square.svg';
 
 // Reusable Flag component using HTML string from flagImg
 function Flag({ code, fallback, iso, size }) {

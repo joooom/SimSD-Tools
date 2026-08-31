@@ -3,7 +3,7 @@ import { CTRY, CAMARA, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } f
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
    ══════════════════════════════════════════════════════ */
-const LOGO_ALT_URL=new URL('./logo-alt.png',import.meta.url).href;
+const LOGO_ALT_URL='/simsd-square.svg';
 const CSNU_MEMBERS=['China','Estados Unidos','França','Reino Unido','Rússia','Brasil','Índia','Quênia','México','Emirados Árabes Unidos'];
 
 /* Committee registry — defines the 4 committees and their data source */

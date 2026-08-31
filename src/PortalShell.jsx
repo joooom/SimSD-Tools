@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionSync } from './sessionSync.js';
-import logoUrl from '../logo.png';
+const logoUrl = '/simsd-square.svg';
 import './collaboration.css';
 
 async function api(path, options = {}) {
