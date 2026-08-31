@@ -74,12 +74,12 @@ export const CAMARA = [
   { c: 'Dep. Aguinaldo Ribeiro', sub: 'PP', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Augusto Coutinho', sub: 'Republicanos', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Baleia Rossi', sub: 'MDB', voto: true, cat: 'Parlamentar' },
-  { c: 'Dep. Carlos Jordy', sub: 'PL', voto: true, cat: 'Parlamentar' },
+  { c: 'Dep. Carlos Jordy', sub: 'PL/RJ', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Elmar Nascimento', sub: 'União Brasil', voto: true, cat: 'Parlamentar' },
-  { c: 'Dep. Érika Hilton', sub: 'PSOL', voto: true, cat: 'Parlamentar' },
+  { c: 'Dep. Erika Hilton', sub: 'PSOL', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Isnaldo Bulhões', sub: 'MDB', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Julia Zanatta', sub: 'PL', voto: true, cat: 'Parlamentar' },
-  { c: 'Dep. Kim Kataguiri', sub: 'MISSÃO', voto: true, cat: 'Parlamentar' },
+  { c: 'Dep. Kim Kataguiri', sub: 'Missão', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Lindbergh Farias', sub: 'PT', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Luiz Gastão', sub: 'PSD', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Nikolas Ferreira', sub: 'PL', voto: true, cat: 'Parlamentar' },
@@ -92,11 +92,34 @@ export const CAMARA = [
   { c: 'Plataforma digital - iFood', sub: 'Plataforma digital', voto: false, cat: 'Plataforma Digital' },
   { c: 'Plataforma digital - Uber', sub: 'Plataforma digital', voto: false, cat: 'Plataforma Digital' },
   { c: 'Soc. Civil - Amobitec', sub: 'Associação Brasileira de Mobilidade e Tecnologia', voto: false, cat: 'Sociedade Civil' },
-  { c: 'Soc. Civil - ANEA', sub: 'Aliança Nacional dos Entregadores por Aplicativos', voto: false, cat: 'Sociedade Civil' },
   { c: 'Soc. Civil - Breque Nacional', sub: 'Movimento nacional de entregadores e motoboys', voto: false, cat: 'Sociedade Civil' },
   { c: 'Soc. Civil - CUT', sub: 'Central Única dos Trabalhadores', voto: false, cat: 'Sociedade Civil' },
   { c: 'Soc. Civil - FENASMAPP', sub: 'Federação Nacional dos Sindicatos de Motoristas por Aplicativos', voto: false, cat: 'Sociedade Civil' }
 ];
+
+export const DELEGATIONS = {
+  unesco: [
+    'África do Sul', 'Alemanha', 'Arábia Saudita', 'Austrália', 'Brasil',
+    'Canadá', 'Chile', 'China', 'Coreia do Sul', 'Emirados Árabes Unidos',
+    'Estados Unidos', 'Estônia', 'Filipinas', 'Finlândia', 'França',
+    'Guatemala', 'Índia', 'Israel', 'Japão', 'México',
+    'Nigéria', 'Peru', 'Reino Unido', 'Rússia', 'Suécia', 'Turquia'
+  ],
+  unodc: [
+    'Afeganistão', 'África do Sul', 'Alemanha', 'Arábia Saudita', 'Argentina',
+    'Bolívia', 'Brasil', 'Canadá', 'China', 'Colômbia',
+    'Espanha', 'Estados Unidos', 'França', 'Índia', 'Irã',
+    'Itália', 'Jamaica', 'Japão', 'Marrocos', 'México',
+    'Nigéria', 'Países Baixos', 'Peru', 'Portugal', 'Reino Unido', 'Uruguai'
+  ],
+  oea: [
+    'Argentina', 'Bolívia', 'Brasil', 'Canadá', 'Chile',
+    'Colômbia', 'Costa Rica', 'El Salvador', 'Equador', 'Estados Unidos',
+    'Guatemala', 'Guiana', 'Haiti', 'Honduras', 'México',
+    'Nicarágua', 'Panamá', 'Paraguai', 'Peru', 'República Dominicana',
+    'Suriname', 'Trinidad e Tobago', 'Uruguai', 'Venezuela'
+  ]
+};
 
 export const FLAG_OVERRIDE = { 'af': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MCA0MCIgd2lkdGg9IjYwIiBoZWlnaHQ9IjQwIj48cmVjdCB3aWR0aD0iNjAiIGhlaWdodD0iNDAiIGZpbGw9IiNmZmZmZmYiLz48dGV4dCB4PSIzMCIgeT0iMTgiIGZvbnQtZmFtaWx5PSInTm90byBOYXNraCBBcmFiaWMnLCdBbWlyaScsJ1NjaGVoZXJhemFkZSBOZXcnLCdBcmlhbCcsc2VyaWYiIGZvbnQtc2l6ZT0iOC41IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMDAwMDAwIiBmb250LXdlaWdodD0iNzAwIiB0ZXh0TGVuZ3RoPSI0OCIgbGVuZ3RoQWRqdXN0PSJzcGFjaW5nQW5kR2x5cGhzIj7ZhNinINil2YTZhyDYpdmE2Kcg2KfZhNmE2Yc8L3RleHQ+PHRleHQgeD0iMzAiIHk9IjMwIiBmb250LWZhbWlseT0iJ05vdG8gTmFza2ggQXJhYmljJywnQW1pcmknLCdTY2hlaGVyYXphZGUgTmV3JywnQXJpYWwnLHNlcmlmIiBmb250LXNpemU9IjcuNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzAwMDAwMCIgZm9udC13ZWlnaHQ9IjcwMCIgdGV4dExlbmd0aD0iNDQiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+2YXYrdmF2K8g2LHYs9mI2YQg2KfZhNmE2Yc8L3RleHQ+PC9zdmc+Cg==' };
 

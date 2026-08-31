@@ -1,4 +1,4 @@
-import { CTRY, CAMARA, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } from './src/utils/flags.js';
+import { CTRY, CAMARA, DELEGATIONS, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } from './src/utils/flags.js';
 
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
@@ -179,6 +179,10 @@ let regionFilterActive='all';
 function activeRoster(){
   if(S.committeeType==='camara'){
     return CAMARA.map(m=>({c:m.c, disp:m.disp||m.c, f:'🏛️', i:null, r:'camara', voto:m.voto, sub:m.sub, cat:m.cat, editable:!!m.editable}));
+  }
+  const allowed = DELEGATIONS[S.committeeKey];
+  if (allowed) {
+    return CTRY.filter(c => allowed.includes(c.c)).map(c=>({c:c.c, f:c.f, i:c.i, r:c.r, voto:true, sub:c.o||null, cat:null}));
   }
   return CTRY.map(c=>({c:c.c, f:c.f, i:c.i, r:c.r, voto:true, sub:c.o||null, cat:null}));
 }
