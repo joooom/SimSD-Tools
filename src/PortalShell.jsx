@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { sessionSync } from './sessionSync.js';
 const logoUrl = '/simsd-square.svg';
 import './collaboration.css';
-
+import licensesText from './opensource-licenses.md?raw';
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -169,12 +169,22 @@ function MembersModal({ room, onClose }) {
   </div></div>;
 }
 
+function LicensesModal({ onClose }) {
+  return <div className="portal-modal-backdrop"><div className="portal-modal licenses-modal" style={{ maxWidth: 800, width: '90%', maxHeight: '80vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+    <div className="portal-modal-head"><div><h2>Licenças Open Source</h2></div><button onClick={onClose}>Fechar</button></div>
+    <div className="licenses-content" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 13, padding: '16px 0', flex: 1, overflowY: 'auto' }}>
+      {licensesText}
+    </div>
+  </div></div>;
+}
+
 function Lobby({ user, onEnterRoom }) {
   const [rooms, setRooms] = useState([]);
   const [name, setName] = useState('');
   const [committeeKey, setCommitteeKey] = useState('unodc');
   const [adminOpen, setAdminOpen] = useState(false);
   const [membersRoom, setMembersRoom] = useState(null);
+  const [licensesOpen, setLicensesOpen] = useState(false);
   const [error, setError] = useState('');
   const load = useCallback(() => api('/api/rooms').then(data => setRooms(data.rooms)).catch(err => setError(err.message)), []);
   useEffect(() => { load(); const timer = setInterval(load, 5000); return () => clearInterval(timer); }, [load]);
@@ -196,9 +206,13 @@ function Lobby({ user, onEnterRoom }) {
           <div className="room-list-grid">{rooms.length ? rooms.map(room => <article key={room.id}><div className="room-card-head"><span className={`room-state ${room.status}`}>{room.status === 'open' ? 'Aberta' : 'Encerrada'}</span><code>{room.code}</code></div><h3>{room.name}</h3><p>{room.owner.name}</p><div className="room-actions"><button className="portal-primary" onClick={() => onEnterRoom(room)}>{room.status === 'open' ? 'Entrar na sala' : 'Visualizar'}</button>{room.canManage && <button onClick={() => setMembersRoom(room)}>Pessoas</button>}</div></article>) : <div className="empty-rooms">Nenhuma sala disponível ainda.</div>}</div>
         </section>
       </div>
+      <footer style={{ textAlign: 'center', padding: '24px 0', marginTop: 'auto', color: '#666' }}>
+        <button onClick={() => setLicensesOpen(true)} style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: 'inherit', fontSize: '0.9em' }}>Licenças Open Source</button>
+      </footer>
     </div>
     {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
     {membersRoom && <MembersModal room={membersRoom} onClose={() => setMembersRoom(null)} />}
+    {licensesOpen && <LicensesModal onClose={() => setLicensesOpen(false)} />}
   </div>;
 }
 
