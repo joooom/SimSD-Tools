@@ -182,10 +182,25 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { state: JSON.parse(room.session_state || 'null'), version: room.state_version, status: room.status });
     }
     if (action === 'members' && method === 'GET') {
-      const members = db.prepare(`
+      const dbMembers = db.prepare(`
         SELECT users.* FROM room_members JOIN users ON users.id=room_members.user_id
         WHERE room_members.room_id=? ORDER BY users.name
       `).all(room.id).map(publicUser);
+      
+      const onlineSockets = [...(socketsByRoom.get(room.id) || [])].filter(s => s.readyState === WebSocket.OPEN && !s.simsdViewer);
+      const membersMap = new Map(dbMembers.map(m => [m.id, m]));
+      for (const socket of onlineSockets) {
+        if (!membersMap.has(socket.simsdUser.id)) {
+          membersMap.set(socket.simsdUser.id, publicUser(socket.simsdUser));
+        }
+      }
+      
+      for (const socket of onlineSockets) {
+        const m = membersMap.get(socket.simsdUser.id);
+        if (m) m.isOnline = true;
+      }
+      
+      const members = Array.from(membersMap.values());
       return sendJson(res, 200, { members });
     }
     if (action === 'members' && method === 'POST') {

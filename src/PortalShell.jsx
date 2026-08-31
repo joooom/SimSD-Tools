@@ -63,31 +63,76 @@ function AdminDashboard({ onClose }) {
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) { setError('Permita pop-ups para abrir o relatório.'); return; }
     reportWindow.document.title = 'Carregando relatório…';
-    let updating = false;
-    let prevBlobUrl = null;
-    const update = async () => {
-      if (reportWindow.closed || updating) return;
-      updating = true;
-      try {
-        const data = await api(`/api/admin/rooms/${room.id}/report?type=${type}`);
-        const html = window.SimSDController?.buildReportHTML(data.state, { type, room: data.room });
-        if (!html) throw new Error('Gerador de relatório indisponível.');
-        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const blobUrl = URL.createObjectURL(blob);
-        reportWindow.location.replace(blobUrl);
-        if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
-        prevBlobUrl = blobUrl;
-      } catch (err) {
-        setError(err.message);
-      } finally { updating = false; }
-    };
-    update();
+    
     if (type === 'partial') {
+      let ws;
+      let currentState = null;
+
+      const render = () => {
+        if (reportWindow.closed) {
+          if (ws) ws.close();
+          return;
+        }
+        if (!currentState) return;
+        try {
+          const html = window.SimSDController?.buildReportHTML(currentState, { type, room });
+          if (!html) return;
+          
+          if (reportWindow.document.body && reportWindow.document.body.innerHTML) {
+            const scrollY = reportWindow.scrollY;
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            reportWindow.document.body.innerHTML = doc.body.innerHTML;
+            reportWindow.scrollTo(0, scrollY);
+          } else {
+            reportWindow.document.write(html);
+            reportWindow.document.close();
+          }
+        } catch (err) {
+          console.error('Erro ao gerar relatório:', err);
+        }
+      };
+
+      const connect = () => {
+        const wsUrl = new URL(`/ws?roomId=${room.id}&mode=viewer`, window.location.href);
+        wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
+        ws = new WebSocket(wsUrl.href);
+        
+        ws.onmessage = (e) => {
+          if (reportWindow.closed) { ws.close(); return; }
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'state:init' || msg.type === 'state:update') {
+            currentState = msg.state;
+            render();
+          }
+        };
+      };
+      connect();
+      
       const timer = setInterval(() => {
-        if (reportWindow.closed) { clearInterval(timer); liveReportTimers.current.delete(timer); }
-        else update();
-      }, 1500);
+        if (reportWindow.closed) {
+          clearInterval(timer);
+          liveReportTimers.current.delete(timer);
+          if (ws) ws.close();
+        }
+      }, 1000);
       liveReportTimers.current.add(timer);
+    } else {
+      let updating = false;
+      const update = async () => {
+        if (reportWindow.closed || updating) return;
+        updating = true;
+        try {
+          const data = await api(`/api/admin/rooms/${room.id}/report?type=${type}`);
+          const html = window.SimSDController?.buildReportHTML(data.state, { type, room: data.room });
+          if (!html) throw new Error('Gerador de relatório indisponível.');
+          reportWindow.document.write(html);
+          reportWindow.document.close();
+        } catch (err) {
+          setError(err.message);
+        } finally { updating = false; }
+      };
+      update();
     }
   };
   return <div className="portal-overlay admin-overlay">
@@ -120,7 +165,7 @@ function MembersModal({ room, onClose }) {
     <div className="portal-modal-head"><div><h2>Pessoas na sala</h2><p>{room.name}</p></div><button onClick={onClose}>Fechar</button></div>
     <form onSubmit={add}><input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="E-mail, login ou ID do portal" required /><button className="portal-primary">Adicionar</button></form>
     {message && <p className="member-message">{message}</p>}
-    <ul>{members.map(member => <li key={member.id}><span>{member.name}<small>{member.email || member.login}</small></span><b>{roleLabel(member.role)}</b></li>)}</ul>
+    <ul>{members.map(member => <li key={member.id}><span>{member.name} {member.isOnline && <span title="Online" style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:'#4caf50',marginLeft:6}}></span>}<small>{member.email || member.login}</small></span><b>{roleLabel(member.role)}</b></li>)}</ul>
   </div></div>;
 }
 
@@ -173,13 +218,13 @@ function RoomBar({ room, user, onLeave }) {
     document.body.classList.toggle('room-readonly', status === 'closed');
     return () => document.body.classList.remove('room-readonly');
   }, [status]);
-  const content = <><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
+  const content = <><div className="mobile-room-warning"><span className="material-icons" style={{fontSize: 48, marginBottom: 16}}>warning</span><h2>Dispositivo incompatível</h2><p>O painel da sala não é suportado em dispositivos móveis. Acesse por um computador.</p><button className="portal-primary" onClick={onLeave}>Voltar às salas</button></div><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
   const slot = document.getElementById('room-bar-slot');
   return slot ? createPortal(content, slot) : content;
 }
 
 function VisitorBar({ onExit }) {
-  const content = <div className="room-bar visitor-bar"><span className="material-icons visitor-icon">person_outline</span><div><strong>Modo visitante</strong><small>Offline · dados salvos somente neste dispositivo</small></div><button onClick={onExit}>Sair do modo visitante</button></div>;
+  const content = <><div className="mobile-room-warning"><span className="material-icons" style={{fontSize: 48, marginBottom: 16}}>warning</span><h2>Dispositivo incompatível</h2><p>O painel da sala não é suportado em dispositivos móveis. Acesse por um computador.</p><button className="portal-primary" onClick={onExit}>Sair do modo visitante</button></div><div className="room-bar visitor-bar"><span className="material-icons visitor-icon">person_outline</span><div><strong>Modo visitante</strong><small>Offline · dados salvos somente neste dispositivo</small></div><button onClick={onExit}>Sair do modo visitante</button></div></>;
   const slot = document.getElementById('room-bar-slot');
   return slot ? createPortal(content, slot) : content;
 }
