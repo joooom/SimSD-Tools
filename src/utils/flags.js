@@ -101,7 +101,7 @@ export const CAMARA = [
 export const DELEGATIONS = {
   unesco: [
     'África do Sul', 'Alemanha', 'Arábia Saudita', 'Argentina', 'Austrália', 'Brasil',
-    'Canadá', 'Chile', 'China', 'Colômbia', 'Coreia do Sul', 'Emirados Árabes Unidos',
+    'Canadá', 'Chile', 'China', 'Colômbia', 'Coreia do Sul', 'Egito', 'Emirados Árabes Unidos',
     'Estados Unidos', 'Estônia', 'Filipinas', 'Finlândia', 'França',
     'Guatemala', 'Índia', 'Indonésia', 'Israel', 'Japão', 'México',
     'Nigéria', 'Peru', 'Reino Unido', 'Rússia', 'Suécia', 'Turquia'
