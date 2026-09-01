@@ -75,6 +75,7 @@ export const CAMARA = [
   { c: 'Dep. Augusto Coutinho', sub: 'Republicanos', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Baleia Rossi', sub: 'MDB', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Carlos Jordy', sub: 'PL/RJ', voto: true, cat: 'Parlamentar' },
+  { c: 'Dep. Dani Cunha', sub: 'PL/RJ', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Elmar Nascimento', sub: 'União Brasil', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Erika Hilton', sub: 'PSOL', voto: true, cat: 'Parlamentar' },
   { c: 'Dep. Isnaldo Bulhões', sub: 'MDB', voto: true, cat: 'Parlamentar' },
@@ -102,7 +103,7 @@ export const DELEGATIONS = {
     'África do Sul', 'Alemanha', 'Arábia Saudita', 'Austrália', 'Brasil',
     'Canadá', 'Chile', 'China', 'Coreia do Sul', 'Emirados Árabes Unidos',
     'Estados Unidos', 'Estônia', 'Filipinas', 'Finlândia', 'França',
-    'Guatemala', 'Índia', 'Israel', 'Japão', 'México',
+    'Guatemala', 'Índia', 'Indonésia', 'Israel', 'Japão', 'México',
     'Nigéria', 'Peru', 'Reino Unido', 'Rússia', 'Suécia', 'Turquia'
   ],
   unodc: [
