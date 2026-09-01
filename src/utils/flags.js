@@ -100,23 +100,23 @@ export const CAMARA = [
 
 export const DELEGATIONS = {
   unesco: [
-    'África do Sul', 'Alemanha', 'Arábia Saudita', 'Austrália', 'Brasil',
-    'Canadá', 'Chile', 'China', 'Coreia do Sul', 'Emirados Árabes Unidos',
+    'África do Sul', 'Alemanha', 'Arábia Saudita', 'Argentina', 'Austrália', 'Brasil',
+    'Canadá', 'Chile', 'China', 'Colômbia', 'Coreia do Sul', 'Emirados Árabes Unidos',
     'Estados Unidos', 'Estônia', 'Filipinas', 'Finlândia', 'França',
     'Guatemala', 'Índia', 'Indonésia', 'Israel', 'Japão', 'México',
     'Nigéria', 'Peru', 'Reino Unido', 'Rússia', 'Suécia', 'Turquia'
   ],
   unodc: [
     'Afeganistão', 'África do Sul', 'Alemanha', 'Arábia Saudita', 'Argentina',
-    'Bolívia', 'Brasil', 'Canadá', 'China', 'Colômbia',
+    'Austrália', 'Bolívia', 'Brasil', 'Canadá', 'China', 'Colômbia',
     'Espanha', 'Estados Unidos', 'França', 'Índia', 'Irã',
     'Itália', 'Jamaica', 'Japão', 'Marrocos', 'México',
-    'Nigéria', 'Países Baixos', 'Peru', 'Portugal', 'Reino Unido', 'Uruguai'
+    'Nigéria', 'Países Baixos', 'Peru', 'Portugal', 'Quênia', 'Reino Unido', 'Singapura', 'Tailândia', 'Uruguai'
   ],
   oea: [
     'Argentina', 'Bolívia', 'Brasil', 'Canadá', 'Chile',
     'Colômbia', 'Costa Rica', 'El Salvador', 'Equador', 'Estados Unidos',
-    'Guatemala', 'Guiana', 'Haiti', 'Honduras', 'México',
+    'Guatemala', 'Guiana', 'Haiti', 'Honduras', 'Jamaica', 'México',
     'Nicarágua', 'Panamá', 'Paraguai', 'Peru', 'República Dominicana',
     'Suriname', 'Trinidad e Tobago', 'Uruguai', 'Venezuela'
   ]
