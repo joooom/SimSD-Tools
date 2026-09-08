@@ -338,6 +338,9 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 wss.on('connection', (ws, _req, room) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   if (!socketsByRoom.has(room.id)) socketsByRoom.set(room.id, new Set());
   socketsByRoom.get(room.id).add(ws);
   ws.send(JSON.stringify({
@@ -375,6 +378,23 @@ wss.on('connection', (ws, _req, room) => {
     if (!socketsByRoom.get(room.id)?.size) socketsByRoom.delete(room.id);
     else broadcastPresence(room.id);
   });
+});
+
+const heartbeatInterval = setInterval(() => {
+  for (const sockets of socketsByRoom.values()) {
+    for (const ws of sockets) {
+      if (ws.isAlive === false) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
 });
 
 server.listen(PORT, HOST, () => {
