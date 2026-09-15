@@ -50,6 +50,7 @@ export default function ViewerApp({ roomId }) {
         setStatus('closed');
         setClosedMessage('Sessão encerrada');
       }
+      if (event.type === 'reopened') setStatus('connected');
     });
 
     // Override applyRemoteState so sessionSync pushes updates here instead of window.SimSDController
@@ -149,7 +150,7 @@ function formatTime(secs) {
 }
 
 function ActiveView({ state, lastPresenceChange }) {
-  switch (state.activeTab) {
+  switch (state.activeTab === 'notes' ? (state.speechMode || 'gsl') : state.activeTab) {
     case 'gsl': return <GslView state={state} />;
     case 'mod': return <ModCaucusView state={state} />;
     case 'unmod': return <UnmodCaucusView state={state} />;

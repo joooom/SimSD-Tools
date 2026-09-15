@@ -562,6 +562,41 @@ def main():
         ws_votes.cell(row=start_row_matrix + 2, column=1, value="Nenhuma votação registrada nesta sessão.").font = data_font
 
     # -------------------------------------------------------------
+    # Notes are part of the exported session, including their speech context.
+    ws_notes = wb.create_sheet(title="Notas da Mesa")
+    rating_fields = [
+        ("topicKnowledge", "Domínio do tema debatido"),
+        ("foreignPolicy", "Aderência à política externa do país representado"),
+        ("debateParticipation", "Participação e contribuição nos debates"),
+        ("diplomacy", "Cooperação e diplomacia"),
+        ("resolutionWriting", "Participação na elaboração do documento de resolução"),
+        ("decorum", "Decoro"), ("punctuality", "Pontualidade"), ("dpo", "DPO"),
+    ]
+    ws_notes.append(["Data (ISO 8601)", "Tipo", "Delegação", "Modo", "Posição", "Tempo restante", "Nota"] + [f"{label} (1–5)" for _, label in rating_fields])
+    for cell in ws_notes[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+    note_types = {"general": "Geral", "delegation": "Delegação", "speech": "Discurso"}
+    modes = {"gsl": "Lista de Discursos", "mod": "Moderado", "solo": "Orador Único"}
+    for note in data.get("notes", []):
+        speech = note.get("speech") or {}
+        ws_notes.append([
+            note.get("createdAt", ""), note_types.get(note.get("type"), ""),
+            note.get("participant") or "", modes.get(speech.get("mode"), ""),
+            speech.get("position"), format_duration(speech.get("remainingSeconds")) if speech else "",
+            note.get("text", ""),
+            *[(note.get("ratings") or {}).get(key) for key, _ in rating_fields],
+        ])
+        for cell in ws_notes[ws_notes.max_row]:
+            # Notes are literal text, even if they begin with '='.
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
+            cell.font = data_font
+            cell.border = border_thin
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    ws_notes.freeze_panes = "A2"
+    ws_notes.auto_filter.ref = ws_notes.dimensions
+
     # POST-PROCESSING: AUTO-FIT COLUMN WIDTHS & GRIDLINES
     # -------------------------------------------------------------
     for ws in wb.worksheets:
@@ -587,6 +622,9 @@ def main():
                     max_len = val_len
                     
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+
+    for column in ws_notes.column_dimensions.values():
+        column.width = min(column.width, 70)
 
     # Save Excel Workbook
     try:

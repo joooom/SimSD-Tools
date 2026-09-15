@@ -9,6 +9,9 @@ import {
   logout, oauthConfigured,
 } from './auth.js';
 import { buildReport, saveReport } from './reports.js';
+import { buildLlmReport } from './llmReport.js';
+import { appendSessionEvent, finishSessionActivities } from '../src/sessionEvents.js';
+import { listGeneralNotes, saveGeneralNote, noteFilters, generalNotesReport, generalNotesXml } from './generalNotes.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -117,10 +120,16 @@ function broadcastPresence(roomId) {
 function closeRoom(room, user) {
   if (room.status === 'closed') return JSON.parse(db.prepare("SELECT payload FROM reports WHERE room_id=? AND report_type='final' ORDER BY id DESC LIMIT 1").get(room.id)?.payload || JSON.stringify(buildReport(room, 'final')));
   const endedAt = nowIso();
+  const state = JSON.parse(room.session_state || 'null');
+  if (state) {
+    finishSessionActivities(state, 'session_closed', endedAt);
+    appendSessionEvent(state, 'session.closed', { actor: { id: user.id, name: user.name } }, endedAt);
+    db.prepare('UPDATE rooms SET session_state=?,state_version=state_version+1 WHERE id=?').run(JSON.stringify(state), room.id);
+  }
   db.prepare('UPDATE rooms SET status=\'closed\',ended_at=?,updated_at=? WHERE id=?').run(endedAt, endedAt, room.id);
   const closed = roomById(room.id);
   const report = saveReport(closed, 'final', user.id);
-  broadcast(room.id, { type: 'room:closed', report });
+  broadcast(room.id, { type: 'room:closed', report, state: JSON.parse(closed.session_state || 'null'), version: closed.state_version });
   return report;
 }
 
@@ -151,6 +160,26 @@ async function handleApi(req, res, url) {
   }
 
   const user = requireUser(req);
+  if (url.pathname === '/api/general-notes' || url.pathname.startsWith('/api/general-notes/')) {
+    if (!['admin', 'simsd_tools'].includes(user.role)) throw Object.assign(new Error('Notas gerais são restritas a Tools e admins.'), { status: 403 });
+    if (url.pathname === '/api/general-notes' && method === 'GET') {
+      return sendJson(res, 200, { notes: listGeneralNotes(user, noteFilters(url.searchParams)) });
+    }
+    if (url.pathname === '/api/general-notes' && method === 'POST') {
+      return sendJson(res, 201, { note: saveGeneralNote(user, await readJson(req)) });
+    }
+    if (url.pathname === '/api/general-notes/export' && method === 'GET') {
+      const filters = noteFilters(url.searchParams);
+      const report = generalNotesReport(listGeneralNotes(user, filters), filters);
+      const format = url.searchParams.get('format') || 'xml';
+      if (!['xml', 'json'].includes(format)) throw Object.assign(new Error('Formato inválido.'), { status: 400 });
+      const content = format === 'xml' ? generalNotesXml(report) : JSON.stringify(report, null, 2);
+      res.writeHead(200, { 'Content-Type': `application/${format}; charset=utf-8`, 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="notas-gerais-avaliacoes.${format}"` });
+      return res.end(content);
+    }
+    const noteMatch = url.pathname.match(/^\/api\/general-notes\/([^/]+)$/);
+    if (noteMatch && method === 'PATCH') return sendJson(res, 200, { note: saveGeneralNote(user, await readJson(req), noteMatch[1]) });
+  }
   if (url.pathname === '/api/rooms' && method === 'GET') return sendJson(res, 200, { rooms: listRooms(user) });
   if (url.pathname === '/api/rooms' && method === 'POST') {
     if (user.role === 'student') {
@@ -172,11 +201,26 @@ async function handleApi(req, res, url) {
     return sendJson(res, 201, { room: publicRoom(roomById(room.id), user) });
   }
 
-  const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)(?:\/(members|close|state))?$/);
+  const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)(?:\/(members|close|state|reopen))?$/);
   if (roomMatch) {
     const room = roomById(roomMatch[1]);
     if (!room || !canAccessRoom(room, user)) throw Object.assign(new Error('Sala não encontrada ou acesso negado.'), { status: 404 });
     const action = roomMatch[2];
+    if (action === 'reopen' && method === 'POST') {
+      requireAdmin(req);
+      if (room.status === 'closed') {
+        const state = JSON.parse(room.session_state || 'null');
+        if (state) {
+          state.sessionEnded = false;
+          appendSessionEvent(state, 'session.reopened', { actor: { id: user.id, name: user.name } });
+        }
+        db.prepare("UPDATE rooms SET status='open',ended_at=NULL,session_state=?,state_version=state_version+1,updated_at=? WHERE id=?")
+          .run(JSON.stringify(state), nowIso(), room.id);
+        const reopened = roomById(room.id);
+        broadcast(room.id, { type: 'room:reopened', state, version: reopened.state_version });
+      }
+      return sendJson(res, 200, { room: publicRoom(roomById(room.id), user) });
+    }
     if (!action && method === 'GET') return sendJson(res, 200, { room: publicRoom(room, user) });
     if (action === 'state' && method === 'GET') {
       return sendJson(res, 200, { state: JSON.parse(room.session_state || 'null'), version: room.state_version, status: room.status });
@@ -204,6 +248,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { members });
     }
     if (action === 'members' && method === 'POST') {
+      if (room.status !== 'open') throw Object.assign(new Error('A sala está encerrada.'), { status: 409 });
       if (!canManageRoom(room, user)) throw Object.assign(new Error('Apenas o criador ou um admin pode adicionar pessoas.'), { status: 403 });
       const body = await readJson(req);
       const identifier = String(body.identifier || '').trim();
@@ -217,6 +262,7 @@ async function handleApi(req, res, url) {
     if (action === 'close' && method === 'POST') {
       if (!canManageRoom(room, user)) throw Object.assign(new Error('Apenas o criador ou um admin pode encerrar a sala.'), { status: 403 });
       const body = await readJson(req);
+      if (room.status === 'closed') return sendJson(res, 200, { report: closeRoom(room, user) });
       if (body.state && typeof body.state === 'object') {
         const serialized = JSON.stringify(body.state);
         if (serialized.length > 2_000_000) throw Object.assign(new Error('Estado da sessão muito grande.'), { status: 413 });
@@ -260,6 +306,17 @@ async function handleApi(req, res, url) {
       FROM rooms JOIN users ON users.id=rooms.owner_user_id ORDER BY rooms.updated_at DESC
     `).all().map(room => ({ ...publicRoom(room, user), memberCount: room.member_count }));
     return sendJson(res, 200, { rooms });
+  }
+  const llmMatch = url.pathname.match(/^\/api\/admin\/rooms\/([^/]+)\/llm-report$/);
+  if (llmMatch && method === 'GET') {
+    requireAdmin(req);
+    const room = roomById(llmMatch[1]);
+    if (!room) throw Object.assign(new Error('Sala não encontrada.'), { status: 404 });
+    res.writeHead(200, {
+      'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="relatorio-avaliativo-llm-${room.code.replace(/[^a-zA-Z0-9_-]/g, '')}.xml"`,
+    });
+    return res.end(buildLlmReport(room));
   }
   const reportMatch = url.pathname.match(/^\/api\/admin\/rooms\/([^/]+)\/report$/);
   if (reportMatch && method === 'GET') {

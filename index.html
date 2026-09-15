@@ -265,6 +265,24 @@
       <div id="tab-solo-root" class="tab-component-host"></div>
       <div id="tab-vote-root" class="tab-component-host"></div>
       <div id="tab-presence-root" class="tab-component-host"></div>
+      <div class="tab-pane" id="tab-notes">
+        <div class="notes-content">
+          <h2>Notas da mesa</h2>
+          <p>Registre observações gerais, sobre uma delegação ou sobre o discurso atual. As notas salvas entram nos relatórios.</p>
+          <div class="notes-form">
+            <label>Tipo<select id="note-type" data-readonly-allow onchange="renderNoteTarget()"><option value="general">Nota geral</option><option value="delegation">Delegação</option><option value="speech">Discurso atual</option></select></label>
+            <label id="note-delegation-label" hidden>Delegação<select id="note-delegation" data-readonly-allow></select></label>
+            <p id="note-speech-context" hidden></p>
+            <label>Nota<textarea id="note-text" rows="4" maxlength="10000" placeholder="Escreva sua observação..."></textarea></label>
+            <details id="note-ratings" hidden><summary>Avaliação da delegação (1 a 5)</summary><p>Preencha apenas os critérios observados. Os demais ficam como “Não avaliado”.</p><div id="note-ratings-fields" class="session-rating-fields"></div></details>
+            <button class="btn-primary" onclick="addNote()">Salvar nota</button>
+            <p id="note-feedback" role="status"></p>
+          </div>
+          <h3>Notas salvas</h3>
+          <label>Filtrar por delegação<select id="note-filter" data-readonly-allow onchange="renderNotes()"></select></label>
+          <div id="notes-list"></div>
+        </div>
+      </div>
 
     </div><!-- /center -->
 
@@ -288,6 +306,7 @@
     <button class="tb" id="tb-solo"        onclick="switchTab('solo')">    <span class="material-icons tb-icon">mic</span>Orador Único</button>
     <button class="tb" id="tb-vote"        onclick="switchTab('vote')">    <span class="material-icons tb-icon">how_to_vote</span>Voto</button>
     <button class="tb" id="tb-presence"    onclick="switchTab('presence')"><span class="material-icons tb-icon">fact_check</span>Presença</button>
+    <button class="tb" id="tb-notes" onclick="switchTab('notes')"><span class="material-icons tb-icon">note_alt</span>Notas</button>
   </nav>
 
 </div><!-- /app-screen -->

@@ -18,7 +18,22 @@ O JSON é estruturado como um objeto único contendo chaves para configurações
 * `committeeType` (String): Tipo do comitê, podendo ser `"onu"` ou `"camara"`.
 * `committeeKey` (String): Identificador abreviado do comitê selecionado (`"camara"`, `"unodc"`, `"oea"`, ou `"unesco"`).
 * `agenda` (String): Descrição da agenda ou tópico adotado na sessão.
-* `activeTab` (String): Última aba visualizada ativa (`"gsl"`, `"motions"`, `"mod"`, `"unmod"`, `"solo"`, `"vote"`, ou `"presence"`).
+* `activeTab` (String): Última aba visualizada ativa (`"gsl"`, `"motions"`, `"mod"`, `"unmod"`, `"solo"`, `"vote"`, `"presence"` ou `"notes"`).
+* `speechMode` (String): Último modo de discurso selecionado (`"gsl"`, `"mod"` ou `"solo"`), usado para vincular notas ao orador atual.
+* `eventLogStartedAt` (String|null): Início do registro detalhado, em ISO 8601. Não implica que acontecimentos anteriores possam ser recuperados.
+* `events` (Array of Objects): Registro cronológico sem descarte por quantidade. Cada evento contém `id`, `type`, `at` (ISO 8601 com fuso) e `details` (cópia dos dados no instante do evento).
+  * Tipos principais: `session.started/updated/configured/closed/reopened`, `speech.started/paused/resumed/finished`, `debate.configured/started/paused/resumed/finished`, `vote.started/cast/reset/recorded`, `motion.proposed/decided/deleted`, `presence.changed/changed_all/confirmed`, `speaker.queued/removed/selected` e `note.added`.
+  * `activityId` relaciona início, pausas, retomadas, encerramento e notas de uma mesma atividade. `seconds` representa tempo consumido no cronômetro, não tempo decorrido de relógio incluindo pausas.
+* `eventActivities` (Object): Atividades iniciadas que ainda não têm encerramento registrado, indexadas por `gsl`, `mod`, `mod-debate`, `unmod` ou `solo`.
+* `notes` (Array of Objects): Histórico de notas incluído nos relatórios parciais, finais e na exportação.
+  * `id` (String): Identificador único da nota.
+  * `type` (String): `"general"`, `"delegation"` ou `"speech"`.
+  * `text` (String): Conteúdo da nota.
+  * `createdAt` (String): Data e hora em ISO 8601.
+  * `participant` (String|null): Delegação vinculada, ou `null` em notas gerais.
+  * `ratings` (Object, opcional): Notas inteiras de 1 a 5 (ou `null` para não avaliado), com chaves `topicKnowledge`, `foreignPolicy`, `debateParticipation`, `diplomacy`, `resolutionWriting`, `decorum`, `punctuality` e `dpo`.
+  * `speech` (Object|null): Contexto fixado ao salvar: `mode`, `participant`, `position` na fila (ou `null` no orador único), `completedSpeeches` e `remainingSeconds`.
+    Inclui `activityId` quando o discurso já tiver sido iniciado.
 * `presenceConfirmed` (Boolean): Indica se a chamada inicial e presença foram finalizadas.
 * `sessionEnded` (Boolean): Indica se a sessão foi explicitamente encerrada pelo Chair.
 

@@ -1,4 +1,6 @@
 import { CTRY, CAMARA, DELEGATIONS, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } from './src/utils/flags.js';
+import { appendSessionEvent, finishSessionActivities } from './src/sessionEvents.js';
+import { EVALUATION_CRITERIA } from './src/evaluationCriteria.js';
 
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
@@ -40,6 +42,9 @@ function makeDefaultState(){return{
   speakers:[],curIdx:0,history:[],turnStartSec:60,
   timer:{sec:60,total:60,running:false,iv:null},
   motions:[],
+  notes:[],
+  events:[],eventLogStartedAt:null,eventActivities:{},
+  speechMode:'gsl',
   votes:{},voteConfig:{type:'procedimental',majority:'simples'},
   voteHistory:[],
   customNames:{},
@@ -61,6 +66,13 @@ function makeDefaultState(){return{
 let S=makeDefaultState();
 let activeRoomId=null;
 let applyingRemoteState=false;
+let readOnly=false;
+function setReadOnly(value){
+  readOnly=Boolean(value);
+  document.body.classList.toggle('room-readonly',readOnly);
+  if(readOnly)stopAll();
+  updateReadOnlyControls();
+}
 
 function stateStorageKey(){return activeRoomId?`simsd-room-${activeRoomId}`:'simsd-v4';}
 function hydrateState(p){
@@ -74,6 +86,10 @@ function hydrateState(p){
   S.voteConfig={...defaults.voteConfig,...(p?.voteConfig||{})};
   S.presence=S.presence||{};S.speeches=S.speeches||{};S.speakTime=S.speakTime||{};
   S.votes=S.votes||{};S.motions=S.motions||[];S.history=S.history||[];
+  S.notes=Array.isArray(S.notes)?S.notes:[];
+  S.events=Array.isArray(S.events)?S.events:[];
+  S.eventActivities=S.eventActivities||{};
+  if(!p?.speechMode&&['gsl','mod','solo'].includes(p?.activeTab))S.speechMode=p.activeTab;
   S.speakers=S.speakers||[];S.voteHistory=S.voteHistory||[];S.committeeCountries=S.committeeCountries||[];
   if(!Array.isArray(S.mod.spks))S.mod.spks=[];
   if(typeof S.mod.cur!=='number')S.mod.cur=0;
@@ -101,11 +117,32 @@ function load(){
   }catch(e){}
 }
 function save(){
+  if(readOnly)return;
   try{
     const cp=sessionSnapshot();
     localStorage.setItem(stateStorageKey(),JSON.stringify(cp));
     if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
   }catch(e){}
+}
+function logEvent(type,details={}){
+  if(readOnly||applyingRemoteState)return null;
+  return appendSessionEvent(S,type,details);
+}
+function activityToggle(key,kind,mode,participant,remaining,wasRunning){
+  let activity=S.eventActivities[key];
+  if(!activity){
+    activity={id:crypto.randomUUID(),kind,mode,participant:participant||null,startedAt:new Date().toISOString(),initialSeconds:remaining};
+    S.eventActivities[key]=activity;
+    logEvent(`${kind}.started`,{...activity,activityId:activity.id});
+  }else{
+    logEvent(`${kind}.${wasRunning?'paused':'resumed'}`,{activityId:activity.id,mode,participant:activity.participant,remainingSeconds:remaining});
+  }
+}
+function finishActivity(key,remaining,reason){
+  const activity=S.eventActivities[key];
+  if(!activity)return;
+  logEvent(`${activity.kind}.finished`,{activityId:activity.id,mode:activity.mode,participant:activity.participant,startedAt:activity.startedAt,seconds:Math.max(0,activity.initialSeconds-remaining),remainingSeconds:remaining,reason});
+  delete S.eventActivities[key];
 }
 function fmt(s){const m=Math.floor(Math.max(0,s)/60),x=Math.max(0,s)%60;return`${m}:${String(x).padStart(2,'0')}`;}
 
@@ -298,6 +335,7 @@ function startSession(){
   // Reset all session-scoped data so leftovers from a previous committee/session
   // never leak into the new one.
   stopAll();
+  finishSessionActivities(S,'session_reconfigured');
   S.presence={};
   S.speeches={};
   S.speakTime={};
@@ -318,6 +356,7 @@ function startSession(){
   S.activeTab='presence';
   S.presenceConfirmed=false;
   S.sessionEnded=false;
+  logEvent('session.started',{config:S.config,participants:S.committeeCountries});
   // Offer to resume the speaker order from a previously ended session of this committee
   try{
     const snaps=loadOrderSnapshots();
@@ -377,6 +416,8 @@ async function encerrarSessao(){
   // 1) Record the speaker order for later resumption
   saveOrderSnapshot();
   // 2) Mark session as closed and persist
+  stopAll();
+  if(!activeRoomId){finishSessionActivities(S,'session_closed');logEvent('session.closed');}
   S.sessionEnded=true;
   save();
   if(activeRoomId){
@@ -440,14 +481,75 @@ function switchTab(name){
   const showRight=['gsl','mod'].includes(name);
   document.getElementById('right-panel').style.display=showRight?'flex':'none';
   document.getElementById('rp-header').textContent=name==='mod'?'Acrescentar Orador (Mod.)':'Acrescentar Orador';
-  const statusMap={gsl:'Lista de Discursos',motions:'Moções',mod:'Sessão Moderada',unmod:'Sessão Não-Moderada',solo:'Orador Único',vote:'Votação',presence:'Presença'};
+  const statusMap={gsl:'Lista de Discursos',motions:'Moções',mod:'Sessão Moderada',unmod:'Sessão Não-Moderada',solo:'Orador Único',vote:'Votação',presence:'Presença',notes:'Notas'};
   document.getElementById('status-pill').textContent=statusMap[name]||name;
-  S.activeTab=name;save();
+  if(!readOnly){
+    S.activeTab=name;
+    if(['gsl','mod','solo'].includes(name))S.speechMode=name;
+    save();
+  }
+  if(name==='notes'){populateNoteSelects();renderNotes();renderNoteTarget();}
   if(name==='presence')renderPresence();
   if(name==='vote')renderVote();
   if(name==='mod'){updateModDisplay();renderModList();}
   if(name==='gsl'){renderSpeakers();}
   renderRP();
+}
+
+function currentNoteSpeech(){
+  const mode=S.speechMode||'gsl';
+  const speaker=mode==='mod'?S.mod.spks[S.mod.cur]:mode==='solo'?{c:S.solo.code}:S.speakers[S.curIdx];
+  if(!speaker?.c)return null;
+  return {mode,participant:speaker.c,position:mode==='mod'?S.mod.cur+1:mode==='gsl'?S.curIdx+1:null,
+    activityId:S.eventActivities[mode]?.id||null,
+    completedSpeeches:Number(S.speeches[speaker.c])||0,
+    remainingSeconds:mode==='mod'?S.mod.spkSec:mode==='solo'?S.solo.sec:S.timer.sec};
+}
+function populateNoteSelects(){
+  for(const id of ['note-delegation','note-filter']){
+    const el=document.getElementById(id),previous=el.value;
+    const names=[...new Set([...S.committeeCountries.map(c=>c.c),...S.notes.map(n=>n.participant).filter(Boolean)])];
+    el.innerHTML=`<option value="">${id==='note-filter'?'Todas as notas':'Selecione uma delegação'}</option>`+names.map(c=>`<option value="${escapeAttr(c)}">${escapeHtml(dispName(c))}</option>`).join('');
+    el.value=previous;
+  }
+}
+function renderNoteTarget(){
+  const type=document.getElementById('note-type').value;
+  document.getElementById('note-ratings').hidden=type==='general';
+  const fields=document.getElementById('note-ratings-fields');
+  if(!fields.children.length)fields.innerHTML=EVALUATION_CRITERIA.map(({id,label})=>`<label>${escapeHtml(label)}<select id="note-score-${id}"><option value="">Não avaliado</option>${[1,2,3,4,5].map(score=>`<option value="${score}">${score}</option>`).join('')}</select></label>`).join('');
+  document.getElementById('note-delegation-label').hidden=type!=='delegation';
+  const el=document.getElementById('note-speech-context');el.hidden=type!=='speech';
+  const speech=currentNoteSpeech();
+  el.textContent=speech?`Discurso atual: ${dispName(speech.participant)} · ${{gsl:'Lista de Discursos',mod:'Moderado',solo:'Orador Único'}[speech.mode]}${speech.position?` · posição ${speech.position}`:''}`:'Nenhum orador atual. Selecione um orador na aba de discursos.';
+}
+function addNote(){
+  if(readOnly)return;
+  const type=document.getElementById('note-type').value;
+  const text=document.getElementById('note-text').value.trim();
+  const speech=type==='speech'?currentNoteSpeech():null;
+  const participant=type==='delegation'?document.getElementById('note-delegation').value:speech?.participant||null;
+  const ratings=Object.fromEntries(EVALUATION_CRITERIA.map(({id})=>[id,type!=='general'&&document.getElementById('note-score-'+id)?.value?Number(document.getElementById('note-score-'+id).value):null]));
+  const feedback=document.getElementById('note-feedback');
+  if(!text&&!Object.values(ratings).some(value=>value!==null)){feedback.textContent='Escreva uma nota ou avalie pelo menos um critério.';return;}
+  if(type!=='general'&&!participant){feedback.textContent='Selecione uma delegação ou um orador atual.';return;}
+  S.notes.push({id:crypto.randomUUID(),type,text,participant,speech,ratings,createdAt:new Date().toISOString()});
+  logEvent('note.added',{noteId:S.notes.at(-1).id,participant,type,activityId:speech?.activityId||null});
+  save();document.getElementById('note-text').value='';feedback.textContent='Nota salva.';
+  EVALUATION_CRITERIA.forEach(({id})=>{document.getElementById('note-score-'+id).value='';});
+  populateNoteSelects();renderNotes();
+}
+function noteContext(note){
+  return `${{general:'Geral',delegation:'Delegação',speech:'Discurso'}[note.type]||note.type}${note.participant?' · '+dispName(note.participant):''}${note.speech?' · '+({gsl:'Lista de Discursos',mod:'Moderado',solo:'Orador Único'}[note.speech.mode]||note.speech.mode)+(note.speech.position?' · posição '+note.speech.position:'')+' · restante '+fmt(note.speech.remainingSeconds):''}`;
+}
+function renderNotes(){
+  const participant=document.getElementById('note-filter').value;
+  const notes=S.notes.filter(n=>!participant||n.participant===participant);
+  document.getElementById('notes-list').innerHTML=notes.length?notes.slice().reverse().map(n=>`<article class="saved-note"><strong>${escapeHtml(noteContext(n))}</strong><small>${escapeHtml(new Date(n.createdAt).toLocaleString('pt-BR'))}</small><p>${escapeHtml(n.text)}</p>${noteRatingsHTML(n)}</article>`).join(''):'<p>Nenhuma nota encontrada.</p>';
+}
+function noteRatingsHTML(note){
+  const assessed=EVALUATION_CRITERIA.filter(({id})=>note.ratings?.[id]!=null);
+  return assessed.length?`<ul>${assessed.map(({id,label})=>`<li>${escapeHtml(label)}: <strong>${escapeHtml(note.ratings[id])}/5</strong></li>`).join('')}</ul>`:'';
 }
 
 /* ══════════════════════════════════════════════════════
@@ -482,6 +584,7 @@ function saveInline(field){
     document.getElementById('agenda-txt').style.display='';
     document.getElementById('agenda-inp').style.display='none';
   }
+  logEvent('session.updated',{field,config:S.config,agenda:S.agenda});
   save();
 }
 
@@ -502,6 +605,9 @@ function openViewerMode(){
   if(activeRoomId) window.open('/viewer?roomId=' + encodeURIComponent(activeRoomId), '_blank');
 }
 function saveConfig(){
+  finishActivity('gsl',S.timer.sec,'reconfigured');
+  clearInterval(S.timer.iv);S.timer.running=false;
+  document.getElementById('btn-gsl-pp').textContent='play_arrow';
   S.config.conference=document.getElementById('c-conf').value.trim()||'Sim SD';
   S.config.committee=document.getElementById('c-committee').value.trim();
   S.config.session=document.getElementById('c-session').value.trim();
@@ -510,6 +616,7 @@ function saveConfig(){
   S.timer.total=S.config.defaultTime;S.timer.sec=S.config.defaultTime;
   document.getElementById('tb-committee').textContent=S.config.committee;
   document.getElementById('tb-session').textContent=S.config.session;
+  logEvent('session.configured',{config:S.config});
   closePanel('cfg-panel');updateGslTimer();save();
 }
 function openPanel(id){
@@ -545,6 +652,8 @@ function updateGslTimer(){
   else{d.className='timer-display';b.className='timer-bar';}
 }
 function gslPP(){
+  if(!S.speakers[S.curIdx])return;
+  activityToggle('gsl','speech','gsl',S.speakers[S.curIdx].c,S.timer.sec,S.timer.running);
   if(S.timer.running){
     clearInterval(S.timer.iv);S.timer.running=false;
     document.getElementById('btn-gsl-pp').textContent='play_arrow';
@@ -559,7 +668,7 @@ function gslPP(){
   }
   save();
 }
-function gslReset(){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
+function gslReset(){finishActivity('gsl',S.timer.sec,'reset');clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
 function gslStop(){
   // "Parar": finaliza o discurso do orador atual, registrando o tempo falado
   // no histórico e encerrando o turno (igual a "Próximo Orador").
@@ -601,10 +710,13 @@ function recordSpeech(cur, timeSpent, opts){
   if(!cur)return;
   opts=opts||{};
   const secs=Math.max(0, timeSpent||0);
+  const event=logEvent('speech.finished',{mode:'gsl',participant:cur.c,seconds:secs,...opts,activityId:S.eventActivities.gsl?.id||null,startedAt:S.eventActivities.gsl?.startedAt||null});
+  delete S.eventActivities.gsl;
   S.speeches[cur.c]=(S.speeches[cur.c]||0)+1;
   S.speakTime=S.speakTime||{};
   S.speakTime[cur.c]=(S.speakTime[cur.c]||0)+secs;
   S.history.unshift({
+    eventId:event?.id,createdAt:event?.at,
     c:cur.c, f:cur.f,
     t:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),
     sec: secs,
@@ -613,7 +725,6 @@ function recordSpeech(cur, timeSpent, opts){
     received: opts.received||null,
     receivedFlag: opts.receivedFlag||null
   });
-  if(S.history.length>120)S.history.pop();
 }
 function yieldToChair(){
   // Current speaker spoke, then yields remaining time back to the Chair (turn ends).
@@ -647,7 +758,7 @@ function yieldToCountry(){
   document.getElementById('yield-box').style.display='none';
   updateGslTimer();renderSpeakers();renderRP();renderHistory();save();
 }
-function clearHistory(){S.history=[];renderHistory();save();}
+function clearHistory(){logEvent('speech_history.cleared',{count:S.history.length});S.history=[];renderHistory();save();}
 
 /* ══════════════════════════════════════════════════════
    SPEAKERS
@@ -655,11 +766,12 @@ function clearHistory(){S.history=[];renderHistory();save();}
 function addSpeaker(code){
   const cc=rosterFind(code);if(!cc)return;
   const target=S.activeTab==='mod'?'mod':'gsl';
+  logEvent('speaker.queued',{mode:target,participant:code});
   if(target==='mod'){S.mod.spks.push({c:cc.c,f:cc.f});renderModList();}
   else{S.speakers.push({c:cc.c,f:cc.f});renderSpeakers();}
   renderRP();save();
 }
-function removeSpk(i){S.speakers.splice(i,1);if(S.curIdx>=S.speakers.length&&S.speakers.length>0)S.curIdx=0;renderSpeakers();renderRP();save();}
+function removeSpk(i){if(i===S.curIdx)finishActivity('gsl',S.timer.sec,'speaker_removed');logEvent('speaker.removed',{mode:'gsl',participant:S.speakers[i]?.c});S.speakers.splice(i,1);if(S.curIdx>=S.speakers.length&&S.speakers.length>0)S.curIdx=0;renderSpeakers();renderRP();save();}
 
 /* ══════════════════════════════════════════════════════
    DRAG & DROP — reorder speakers in the queue
@@ -768,10 +880,12 @@ function addMotion(){
   const spk=document.getElementById('mo-spk').value;
   if(!prop)return;
   S.motions.unshift({id:Date.now()+'',type,prop,dur,spk,status:'pending',ts:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
+  const event=logEvent('motion.proposed',{...S.motions[0]});
+  S.motions[0].eventId=event?.id;S.motions[0].createdAt=event?.at;
   renderMotions();save();
 }
-function voteMotion(id,s){const m=S.motions.find(x=>x.id===id);if(!m)return;m.status=s;renderMotions();save();}
-function delMotion(id){S.motions=S.motions.filter(m=>m.id!==id);renderMotions();save();}
+function voteMotion(id,s){const m=S.motions.find(x=>x.id===id);if(!m)return;logEvent('motion.decided',{motionId:id,previousStatus:m.status,status:s,motion:m});m.status=s;renderMotions();save();}
+function delMotion(id){logEvent('motion.deleted',{motionId:id,motion:S.motions.find(m=>m.id===id)});S.motions=S.motions.filter(m=>m.id!==id);renderMotions();save();}
 function renderMotions(){
   const el=document.getElementById('mo-list');
   if(!el)return;
@@ -859,16 +973,18 @@ function setCustomName(code,val){
 }
 function concluirPresenca(){
   S.presenceConfirmed=true;
+  logEvent('presence.confirmed',{presence:S.presence});
   save();
   switchTab('gsl');
 }
-function setPresence(code,val,el){S.presence[code]=val;el.className='psel ps-'+val.replace(' ','-');renderPresence();save();}
+function setPresence(code,val,el){logEvent('presence.changed',{participant:code,status:val,previousStatus:S.presence[code]});S.presence[code]=val;el.className='psel ps-'+val.replace(' ','-');renderPresence();save();}
 function setAll(val){
   // "Todos Votantes" only applies the votante status to participants that may vote
   S.committeeCountries.forEach(c=>{
     if(val==='presente-votante' && c.voto===false){ S.presence[c.c]='presente'; }
     else { S.presence[c.c]=val; }
   });
+  logEvent('presence.changed_all',{presence:S.presence});
   renderPresence();save();
 }
 function exportCSV(){
@@ -896,15 +1012,17 @@ function registerVote(){
   const approved=maj>0&&totalFavor>=maj;
   const label=(document.getElementById('vote-label')?.value||'').trim()||'(sem título)';
   S.voteHistory.unshift({
+    id:crypto.randomUUID(),createdAt:new Date().toISOString(),
     label, type:S.voteConfig.type, majority:S.voteConfig.majority,
     t:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),
     tally, maj, totalFavor, approved, detail
   });
-  if(S.voteHistory.length>60)S.voteHistory.pop();
+  const event=logEvent('vote.recorded',S.voteHistory[0]);
+  S.voteHistory[0].eventId=event?.id;
   save();
   alert(`Votação registrada: ${label}\n${approved?'APROVADA':'NÃO APROVADA'} (${totalFavor} a favor / ${maj} necessários)`);
   if(document.getElementById('vote-label'))document.getElementById('vote-label').value='';
-  S.votes={};renderVote();
+  S.votes={};renderVote();save();
 }
 
 // Build the printable report used both by the chair and by the admin panel.
@@ -1074,6 +1192,9 @@ function buildReportHTML(options={}){
   <h2>Votações</h2>
   ${voteBlocks}
 
+  <h2>Notas da mesa</h2>
+  ${S.notes.length?S.notes.map(n=>`<div style="break-inside:avoid"><h3>${esc(noteContext(n))}</h3><small>${esc(new Date(n.createdAt).toLocaleString('pt-BR'))}</small><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(n.text)}</p>${noteRatingsHTML(n)}</div>`).join(''):'<p class="empty-note">Nenhuma nota registrada.</p>'}
+
   <div class="rfoot">${isPartial?'Relatório parcial atualizado automaticamente':'Documento gerado automaticamente pelo Sim SD Chair'} · ${now}</div>
 </body></html>`;
 
@@ -1121,8 +1242,8 @@ function pickR(groupId,el,val){
   if(groupId==='vt-type')S.voteConfig.type=val;
   else S.voteConfig.majority=val;
 }
-function startVote(){closePanel('vote-panel');S.votes={};renderVote();save();}
-function resetVote(){S.votes={};renderVote();save();}
+function startVote(){logEvent('vote.started',{config:S.voteConfig});closePanel('vote-panel');S.votes={};renderVote();save();}
+function resetVote(){logEvent('vote.reset',{votes:S.votes,config:S.voteConfig});S.votes={};renderVote();save();}
 function castVote(code,val){
   // Enforce abstention rules: only "Presente" (non-votante) nations may abstain,
   // and only in substantive votes.
@@ -1130,6 +1251,7 @@ function castVote(code,val){
     const allowed=S.voteConfig.type==='substancial' && S.presence[code]==='presente';
     if(!allowed)return;
   }
+  logEvent('vote.cast',{participant:code,value:val||null,previousValue:S.votes[code]||null,config:S.voteConfig});
   S.votes[code]=val;renderVote();save();
 }
 function renderVote(){
@@ -1206,6 +1328,8 @@ function updateModDisplay(){
   document.getElementById('mod-spk-d').textContent=`${fmt(S.mod.spkSec)} / ${fmt(S.mod.spkTotal)}`;
 }
 function modPP(){
+  activityToggle('mod-debate','debate','mod',null,S.mod.totalSec,S.mod.running);
+  if(S.mod.spks[0])activityToggle('mod','speech','mod',S.mod.spks[0].c,S.mod.spkSec,S.mod.running);
   if(S.mod.running){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';}
   else{S.mod.running=true;document.getElementById('btn-mod-pp').textContent='pause';
     S.mod.iv=setInterval(()=>{
@@ -1216,8 +1340,8 @@ function modPP(){
     },1000);}
   save();
 }
-function modReset(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
-function modNext(){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
+function modReset(){finishActivity('mod',S.mod.spkSec,'reset');finishActivity('mod-debate',S.mod.totalSec,'reset');clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
+function modNext(){finishActivity('mod',S.mod.spkSec,S.mod.spkSec<=0?'time_expired':'next_speaker');if(S.mod.totalSec<=0)finishActivity('mod-debate',S.mod.totalSec,'time_expired');else if(S.eventActivities['mod-debate'])logEvent('debate.paused',{activityId:S.eventActivities['mod-debate'].id,mode:'mod',remainingSeconds:S.mod.totalSec,reason:'speaker_finished'});clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
 function renderModList(){
   // Current speaker = first in the mod queue (independent from the GSL list)
   const cur=S.mod.spks[0];
@@ -1243,19 +1367,20 @@ function renderModList(){
       <span class="drag-handle material-icons" title="Arraste para reordenar">drag_indicator</span>
     </div>`).join('');
 }
-function removeModSpk(i){S.mod.spks.splice(i,1);renderModList();renderRP();save();}
+function removeModSpk(i){if(i===0)finishActivity('mod',S.mod.spkSec,'speaker_removed');logEvent('speaker.removed',{mode:'mod',participant:S.mod.spks[i]?.c});S.mod.spks.splice(i,1);renderModList();renderRP();save();}
 
 /* ══════════════════════════════════════════════════════
    UNMOD CAUCUS
    ══════════════════════════════════════════════════════ */
 function updateUnmodDisplay(){document.getElementById('unmod-d').textContent=`${fmt(S.unmod.sec)} / ${fmt(S.unmod.total)}`;}
 function unmodPP(){
+  activityToggle('unmod','debate','unmod',null,S.unmod.sec,S.unmod.running);
   if(S.unmod.running){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';}
   else{S.unmod.running=true;document.getElementById('btn-unmod-pp').textContent='pause';
     S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();save();},1000);}
   save();
 }
-function unmodReset(){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
+function unmodReset(){finishActivity('unmod',S.unmod.sec,S.unmod.sec<=0?'time_expired':'reset');clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    CAUCUS SETTINGS
@@ -1273,6 +1398,14 @@ function openCaucus(target){
 function applyCaucus(){
   const tot=parseInt(document.getElementById('cau-total').value)||15;
   const spk=parseInt(document.getElementById('cau-spk').value)||60;
+  if(S.caucusTarget==='mod'){
+    finishActivity('mod',S.mod.spkSec,'reconfigured');finishActivity('mod-debate',S.mod.totalSec,'reconfigured');
+    clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';
+  }else{
+    finishActivity('unmod',S.unmod.sec,'reconfigured');
+    clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';
+  }
+  logEvent('debate.configured',{mode:S.caucusTarget,totalSeconds:tot*60,speakerSeconds:S.caucusTarget==='mod'?spk:null});
   if(S.caucusTarget==='mod'){S.mod.totalTotal=tot*60;S.mod.totalSec=tot*60;S.mod.spkTotal=spk;S.mod.spkSec=spk;updateModDisplay();}
   else{S.unmod.total=tot*60;S.unmod.sec=tot*60;updateUnmodDisplay();}
   closePanel('caucus-panel');save();
@@ -1286,7 +1419,12 @@ function initSolo(){
   sel.innerHTML='<option value="">'+escapeHtml(selectPrompt())+'</option>'+S.committeeCountries.map(c=>`<option value="${escapeAttr(c.c)}">${isCamaraCte()?'':escapeHtml(c.f)+' '}${escapeHtml(dispName(c.c))}${c.sub?' ('+escapeHtml(c.sub)+')':''}</option>`).join('');
   sel.onchange=()=>{
     const code=sel.value;
-    if(!code){document.getElementById('solo-cur-row').style.display='none';return;}
+    finishActivity('solo',S.solo.sec,'speaker_changed');
+    clearInterval(S.solo.iv);S.solo.running=false;S.solo.sec=S.solo.total;
+    document.getElementById('btn-solo-pp').textContent='play_arrow';updateSoloDisplay();
+    S.solo.code=code;
+    logEvent('speaker.selected',{mode:'solo',participant:code||null});
+    if(!code){document.getElementById('solo-cur-row').style.display='none';save();return;}
     const cc=S.committeeCountries.find(x=>x.c===code)||{f:'🏳️',i:null};
     S.solo.code=code;S.solo.flag=cc.f;S.solo.iso=cc.i;
     document.getElementById('solo-flag').innerHTML=flagImg(code,cc.f,cc.i,26);
@@ -1299,12 +1437,14 @@ function initSolo(){
 }
 function updateSoloDisplay(){const d=document.getElementById('solo-timer'),b=document.getElementById('solo-bar');if(!d)return;d.textContent=fmt(S.solo.sec);b.style.width=(S.solo.sec/S.solo.total*100)+'%';}
 function soloPP(){
+  if(!S.solo.code)return;
+  activityToggle('solo','speech','solo',S.solo.code,S.solo.sec,S.solo.running);
   if(S.solo.running){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';}
   else{S.solo.running=true;document.getElementById('btn-solo-pp').textContent='pause';
     S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();save();},1000);}
   save();
 }
-function soloReset(){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
+function soloReset(){finishActivity('solo',S.solo.sec,S.solo.sec<=0?'time_expired':'reset');clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    POPULATE SELECTS
@@ -1318,6 +1458,7 @@ function populateSelects(){
    KEYBOARD SHORTCUTS
    ══════════════════════════════════════════════════════ */
 document.addEventListener('keydown',e=>{
+  if(readOnly)return;
   const tag=document.activeElement?.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
   if(e.key===' '){e.preventDefault();if(S.activeTab==='gsl')gslPP();else if(S.activeTab==='mod')modPP();else if(S.activeTab==='unmod')unmodPP();}
@@ -1366,6 +1507,7 @@ function showCurrentState(){
 
 function setRoomContext(roomId){
   activeRoomId=roomId||null;
+  setReadOnly(false);
 }
 
 function startFreshRoom(committeeKey){
@@ -1408,13 +1550,14 @@ function reportHTMLForState(snapshot,options={}){
 
 window.SimSDController={
   snapshot:sessionSnapshot,
+  setReadOnly,
   setRoomContext,
   startFreshRoom,
   applyRemoteState,
   buildReportHTML:reportHTMLForState,
 };
 
-Object.assign(window,{
+const chairActions={
   chooseCommittee,backToCommittee,renderCountryGrid,filterRegion,toggleSetup,
   selectVisible,deselectAll,selectCSNU,selectALL193,startSession,goSetup,
   encerrarSessao,resetSession,switchTab,inlineEdit,saveInline,openCfg,saveConfig,openViewerMode,
@@ -1425,7 +1568,36 @@ Object.assign(window,{
   exportCSV,registerVote,generateReport,exportSessionJSON,pickR,startVote,resetVote,
   castVote,modPP,modReset,modNext,removeModSpk,unmodPP,unmodReset,openCaucus,
   applyCaucus,soloPP,soloReset,renderRP,
-});
+  addNote,renderNotes,renderNoteTarget,
+};
+
+// Keep consultation available while preventing every UI write path, including
+// inline handlers, keyboard input and drag-and-drop, in a closed room.
+const readActions=new Set(['switchTab','openCfg','openPanel','closePanel','generateReport','exportCSV','exportSessionJSON','openViewerMode','renderRP','renderNotes','renderNoteTarget','filterRegion','renderCountryGrid']);
+function isReadControl(target){
+  const action=target.getAttribute('onclick')?.match(/^\s*(\w+)\(/)?.[1];
+  return target.hasAttribute('data-readonly-allow')||['rp-search','country-search'].includes(target.id)||readActions.has(action);
+}
+function updateReadOnlyControls(){
+  document.querySelectorAll('#react-app button,#react-app input,#react-app select,#react-app textarea').forEach(el=>{
+    if(el.closest('.room-bar')||isReadControl(el))return;
+    if(readOnly&&!el.disabled){el.dataset.roomDisabled='true';el.disabled=true;}
+    else if(!readOnly&&el.dataset.roomDisabled){el.disabled=false;delete el.dataset.roomDisabled;}
+  });
+}
+new MutationObserver(()=>{if(readOnly)updateReadOnlyControls();}).observe(document.getElementById('react-app'),{childList:true,subtree:true});
+for(const [name,fn] of Object.entries(chairActions)){
+  window[name]=(...args)=>{if(!readOnly||readActions.has(name))return fn(...args);};
+}
+for(const eventName of ['click','dblclick','beforeinput','change','keydown','dragstart','drop']){
+  document.addEventListener(eventName,event=>{
+    if(!readOnly||!event.target.closest('#react-app')||event.target.closest('.room-bar'))return;
+    const target=event.target.closest('button,input,select,textarea,[onclick],[onchange],[draggable]');
+    if(!target||isReadControl(target))return;
+    if(eventName==='keydown'&&['Tab','Escape','ArrowDown','ArrowUp','PageDown','PageUp','Home','End'].includes(event.key)&&!target.matches('input,select,textarea'))return;
+    event.preventDefault();event.stopImmediatePropagation();
+  },true);
+}
 
 load();
 showCurrentState();

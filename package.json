@@ -12,7 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env server/index.js",
-    "test": "node tests/run-integration.mjs"
+    "test": "node --test tests/llm-report.test.mjs tests/session-sync.test.mjs && node tests/run-integration.mjs"
   },
   "dependencies": {
     "material-icons": "^1.13.14",

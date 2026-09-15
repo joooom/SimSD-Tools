@@ -917,3 +917,16 @@ select.m-inp { cursor: pointer; }
 .btn-report, .btn-reset-all {
   display: flex;
 }
+/* Chair notes retain normal scrolling in closed rooms. */
+.notes-content { padding: 1.25rem; overflow-y: auto; min-height: 0; flex: 1; }
+.notes-form { display: grid; gap: .75rem; max-width: 760px; margin: 1rem 0; }
+.notes-content label { display: grid; gap: .35rem; }
+.notes-content label[hidden] { display: none; }
+.notes-content select, .notes-content textarea { padding: .65rem; border: 1px solid #d6d0c9; border-radius: 6px; font: inherit; }
+.notes-content textarea { resize: vertical; }
+.saved-note { padding: 1rem; margin-top: .75rem; border: 1px solid #d6d0c9; border-radius: 8px; background: #fff; }
+.saved-note small { display: block; color: #6a635c; margin-top: .3rem; }
+.saved-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.room-readonly .notes-form textarea { background: #eeeae5; }
+.session-rating-fields { display: grid; gap: 10px; margin-top: 12px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); }
+.room-readonly #react-app :disabled { opacity: .55; cursor: not-allowed; }

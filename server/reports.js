@@ -38,6 +38,7 @@ export function buildReport(room, type = 'partial') {
     speechRanking,
     motions,
     votes,
+    notes: Array.isArray(state.notes) ? state.notes : [],
     presence: countries.map(item => ({ participant: item.c, subtitle: item.sub || '', status: presence[item.c] || 'ausente' })),
   };
 }

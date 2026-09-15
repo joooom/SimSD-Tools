@@ -45,3 +45,19 @@ npm run build
 ```
 
 O teste integrado usa um banco isolado e valida papéis, ACL de salas, convites, sincronização WebSocket, conflitos de versão, encerramento e relatórios.
+
+## Relatório avaliativo para LLM
+
+No **Painel administrativo**, cada sala possui o botão **Relatório avaliativo para LLM**. Ele baixa um arquivo XML UTF-8 com os dados salvos da sessão, participantes, todas as notas e a cronologia dos acontecimentos. A exportação funciona em salas abertas e encerradas e exige acesso de admin também no servidor (`GET /api/admin/rooms/:id/llm-report`). O arquivo pode ser anexado ao modelo de IA escolhido; o app não envia os dados a serviços de IA.
+
+Os eventos registram início, pausas, retomadas e término de discursos e debates moderados/não moderados, votos e resultados, moções, presença e alterações da sessão. Eles contêm metadados e tempos de fala, **não transcrições dos discursos**. Pausas e retomadas compartilham um identificador de atividade.
+
+Sessões anteriores à criação desse registro exportam o histórico disponível. Registros antigos com apenas hora, sem data completa, aparecem em uma seção separada; não é possível recuperar eventos já descartados ou debates que não eram registrados. O XML informa essa limitação e a data de início do registro detalhado.
+
+## Notas gerais e avaliações
+
+Na seleção de salas, a área **Notas gerais** é exclusiva para usuários **Tools e admins**, com proteção também nas APIs. Ela reúne notas externas sobre DPOs e delegações e as notas das sessões abertas ou encerradas. Há filtros por comitê, delegação, origem e texto, além de exportação dos resultados em XML para LLM ou JSON.
+
+As notas externas são persistidas no banco independentemente das salas, com autor e datas. O autor e admins podem editá-las; edições simultâneas são detectadas para evitar sobrescrita. Notas das sessões são consultadas nessa área e continuam sendo registradas dentro das salas.
+
+Os oito critérios de avaliação aceitam valores inteiros de **1 a 5**: domínio do tema, aderência à política externa, participação nos debates, cooperação e diplomacia, elaboração da resolução, decoro, pontualidade e DPO. Cada critério é opcional; **Não avaliado** não equivale a zero. As avaliações também podem ser adicionadas às notas de delegação e discurso nas salas e são incluídas nos relatórios e exportações.

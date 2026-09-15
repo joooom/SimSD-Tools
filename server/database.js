@@ -66,6 +66,19 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON app_sessions(expires_at);
+  CREATE TABLE IF NOT EXISTS general_notes (
+    id TEXT PRIMARY KEY,
+    committee_key TEXT NOT NULL,
+    delegation TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('dpo','observation','evaluation')),
+    text TEXT NOT NULL,
+    ratings TEXT NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS idx_general_notes_committee ON general_notes(committee_key,delegation,created_at);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_reports_room ON reports(room_id,created_at);
 `);
