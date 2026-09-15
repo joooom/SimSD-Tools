@@ -1,4 +1,4 @@
-import { CAMARA, DELEGATIONS } from './utils/flags.js';
+import { CAMARA, DELEGATIONS } from './flags.js';
 
 export const COMMITTEE_NAMES = {
   camara: 'Câmara dos Deputados', unodc: 'UNODC', oea: 'OEA', unesco: 'UNESCO',
