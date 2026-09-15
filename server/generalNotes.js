@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db, nowIso } from './database.js';
-import { COMMITTEE_NAMES, NOTE_KINDS, EVALUATION_CRITERIA, committeeDelegations, validateRatings } from '../src/evaluationCriteria.js';
+import { COMMITTEE_NAMES, NOTE_KINDS, EVALUATION_CRITERIA, committeeDelegations, validateRatings } from './evaluationCriteria.js';
 import { xmlText, fields } from './llmReport.js';
 
 const badRequest = message => Object.assign(new Error(message), { status: 400 });

@@ -10,7 +10,7 @@ import {
 } from './auth.js';
 import { buildReport, saveReport } from './reports.js';
 import { buildLlmReport } from './llmReport.js';
-import { appendSessionEvent, finishSessionActivities } from '../src/sessionEvents.js';
+import { appendSessionEvent, finishSessionActivities } from './sessionEvents.js';
 import { listGeneralNotes, saveGeneralNote, noteFilters, generalNotesReport, generalNotesXml } from './generalNotes.js';
 
 const DEV_SERVER = process.argv.includes('--dev');

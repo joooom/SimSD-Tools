@@ -1,4 +1,4 @@
-import { EVALUATION_CRITERIA } from '../src/evaluationCriteria.js';
+import { EVALUATION_CRITERIA } from './evaluationCriteria.js';
 
 export function xmlText(value) {
   return String(value ?? '').replace(/[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, '')
