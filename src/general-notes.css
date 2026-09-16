@@ -20,7 +20,7 @@
 .central-notes-list { display: grid; gap: 14px; }
 .central-note { border: 1px solid #e0dbd4; border-radius: 10px; padding: 16px; overflow-wrap: anywhere; }
 .central-note-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; margin-bottom: 12px; }
-.central-note-header button { margin-left: auto; }
+.central-note-actions { margin-left: auto; display: flex; gap: 8px; }
 .note-origin.session { color: #395773; background: #edf3f8; }
 .central-note-text { white-space: pre-wrap; color: #1a1714!important; }
 .criteria-scores { display: grid; gap: 8px; margin: 12px 0 0; }

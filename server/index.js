@@ -11,7 +11,8 @@ import {
 import { buildReport, saveReport } from './reports.js';
 import { buildLlmReport } from './llmReport.js';
 import { appendSessionEvent, finishSessionActivities } from './sessionEvents.js';
-import { listGeneralNotes, saveGeneralNote, noteFilters, generalNotesReport, generalNotesXml } from './generalNotes.js';
+import { listGeneralNotes, listNoteSessions, saveGeneralNote, deleteGeneralNote, changeSessionNote, noteFilters } from './generalNotes.js';
+import { generalNotesReport, generalNotesXml } from './generalNotesReport.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -163,14 +164,14 @@ async function handleApi(req, res, url) {
   if (url.pathname === '/api/general-notes' || url.pathname.startsWith('/api/general-notes/')) {
     if (!['admin', 'simsd_tools'].includes(user.role)) throw Object.assign(new Error('Notas gerais são restritas a Tools e admins.'), { status: 403 });
     if (url.pathname === '/api/general-notes' && method === 'GET') {
-      return sendJson(res, 200, { notes: listGeneralNotes(user, noteFilters(url.searchParams)) });
+      return sendJson(res, 200, { notes: listGeneralNotes(user, noteFilters(url.searchParams)), sessions: listNoteSessions() });
     }
     if (url.pathname === '/api/general-notes' && method === 'POST') {
       return sendJson(res, 201, { note: saveGeneralNote(user, await readJson(req)) });
     }
     if (url.pathname === '/api/general-notes/export' && method === 'GET') {
       const filters = noteFilters(url.searchParams);
-      const report = generalNotesReport(listGeneralNotes(user, filters), filters);
+      const report = generalNotesReport(listGeneralNotes(user, filters), filters, db.prepare('SELECT * FROM rooms WHERE session_state IS NOT NULL').all());
       const format = url.searchParams.get('format') || 'xml';
       if (!['xml', 'json'].includes(format)) throw Object.assign(new Error('Formato inválido.'), { status: 400 });
       const content = format === 'xml' ? generalNotesXml(report) : JSON.stringify(report, null, 2);
@@ -178,7 +179,18 @@ async function handleApi(req, res, url) {
       return res.end(content);
     }
     const noteMatch = url.pathname.match(/^\/api\/general-notes\/([^/]+)$/);
-    if (noteMatch && method === 'PATCH') return sendJson(res, 200, { note: saveGeneralNote(user, await readJson(req), noteMatch[1]) });
+    if (noteMatch && ['PATCH', 'DELETE'].includes(method)) {
+      const body = await readJson(req);
+      const id = decodeURIComponent(noteMatch[1]);
+      if (id.startsWith('session:')) {
+        const { roomId, ...update } = changeSessionNote(user, id, body, method === 'DELETE');
+        broadcast(roomId, { type: 'state:update', ...update, updatedBy: publicUser(user) });
+        return sendJson(res, 200, { ok: true });
+      }
+      if (method === 'PATCH') return sendJson(res, 200, { note: saveGeneralNote(user, body, id) });
+      deleteGeneralNote(user, id, body);
+      return sendJson(res, 200, { ok: true });
+    }
   }
   if (url.pathname === '/api/rooms' && method === 'GET') return sendJson(res, 200, { rooms: listRooms(user) });
   if (url.pathname === '/api/rooms' && method === 'POST') {

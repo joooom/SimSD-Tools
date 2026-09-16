@@ -144,8 +144,8 @@ const state1 = {
   speeches: { Brasil: 2, França: 1 }, speakTime: { Brasil: 90, França: 30 },
   motions: [{ id: 'm1', status: 'approved' }], voteHistory: [{ id: 'v1' }], agenda: 'IA na educação',
   notes: [
-    { id: 'n1', type: 'general', text: 'Observação geral', createdAt: new Date().toISOString(), participant: null, speech: null },
-    { id: 'n2', type: 'delegation', text: 'Boa participação', createdAt: new Date().toISOString(), participant: 'Brasil', speech: null },
+    { id: 'n1', type: 'general', text: 'Observação geral', createdAt: '2026-09-16T02:59:59Z', participant: null, speech: null },
+    { id: 'n2', type: 'delegation', text: 'Boa participação', createdAt: '2026-09-16T03:00:00Z', participant: 'Brasil', speech: null },
     { id: 'n3', type: 'speech', text: 'Argumentação clara', ratings: { diplomacy: 4 }, createdAt: new Date().toISOString(), participant: 'França', speech: { mode: 'gsl', position: 2, remainingSeconds: 30 } },
   ],
 };
@@ -161,9 +161,32 @@ const centralNotes = (await request('/api/general-notes?committeeKey=unesco', { 
 assert.equal(centralNotes.length, 4);
 assert.equal(centralNotes.filter(note => note.source === 'session').length, 3);
 assert.equal(centralNotes.find(note => note.participant === 'França').ratings.diplomacy, 4);
-assert.equal(centralNotes.find(note => note.source === 'session').canEdit, false);
+assert.equal(centralNotes.find(note => note.source === 'session').canEdit, true);
 assert.equal((await request('/api/general-notes?source=session', { cookie: tools.cookie })).data.notes.length, 3);
 assert.equal((await request('/api/general-notes/export?format=json&source=session', { cookie: tools.cookie })).data.notes.length, 3);
+await request('/api/general-notes?day=2026-02-30', { cookie: tools.cookie, expected: 400 });
+const dayNotes = (await request('/api/general-notes?source=session&day=2026-09-15', { cookie: tools.cookie })).data.notes;
+assert.ok(dayNotes.some(note => note.id.endsWith(':n1')));
+assert.ok(!dayNotes.some(note => note.id.endsWith(':n2')));
+const dayExport = (await request('/api/general-notes/export?format=json&source=session&day=2026-09-15', { cookie: tools.cookie })).data;
+assert.deepEqual(dayExport.notes.map(note => note.id), dayNotes.map(note => note.id));
+assert.equal(dayExport.sessions.length, 1);
+assert.deepEqual(dayExport.sessions[0].state.notes.map(note => note.id), dayNotes.map(note => note.id.split(':').at(-1)));
+const combinedXml = await (await fetch(`${base}/api/general-notes/export?source=session&day=2026-09-15`, { headers: { Cookie: tools.cookie } })).text();
+assert.match(combinedXml, /<sessions count="1">/);
+assert.doesNotMatch(combinedXml, /type="motion.legacy"/);
+assert.doesNotMatch(combinedXml, /type="vote.legacy"/);
+assert.doesNotMatch(combinedXml, /Boa participação/);
+assert.equal((combinedXml.match(/<\?xml/g) || []).length, 1);
+const sessionList = (await request(`/api/general-notes?roomId=${room.id}`, { cookie: tools.cookie })).data;
+assert.ok(sessionList.sessions.some(session => session.id === room.id));
+assert.equal(sessionList.notes.length, 3);
+assert.ok(sessionList.notes.every(note => note.session.roomId === room.id));
+assert.equal((await request('/api/general-notes?roomId=missing', { cookie: tools.cookie })).data.notes.length, 0);
+const selectedSessionExport = (await request(`/api/general-notes/export?format=json&roomId=${room.id}&delegation=Brasil`, { cookie: tools.cookie })).data;
+assert.equal(selectedSessionExport.notes.length, 1);
+assert.equal(selectedSessionExport.sessions.length, 1);
+assert.deepEqual(selectedSessionExport.sessions[0].state.notes.map(note => note.participant), ['Brasil']);
 
 first.socket.send(JSON.stringify({ type: 'state:update', state: state1, baseVersion: 1 }));
 const conflict = await first.inbox.next('state:conflict');
@@ -206,6 +229,9 @@ assert.equal(finalPayload.state.sessionEnded, true);
 assert.equal(finalPayload.room.status, 'closed');
 assert.equal((await request('/api/general-notes?source=session', { cookie: tools.cookie })).data.notes.length, 3);
 assert.deepEqual(final.notes, state1.notes);
+const closedNote = (await request('/api/general-notes?source=session', { cookie: admin.cookie })).data.notes[0];
+assert.equal(closedNote.canEdit, false);
+await request(`/api/general-notes/${encodeURIComponent(closedNote.id)}`, { cookie: admin.cookie, method: 'DELETE', body: { version: closedNote.version }, expected: 403 });
 // Closed rooms remain readable, but neither WebSocket nor repeated close can write.
 first.socket.send(JSON.stringify({ type: 'state:update', state: state1, baseVersion: 3 }));
 assert.match((await first.inbox.next('error')).message, /encerrada/);
@@ -243,5 +269,38 @@ await request(`/api/admin/rooms/${room.id}`, { cookie: invited.cookie, method: '
 await request(`/api/admin/rooms/${room.id}`, { cookie: admin.cookie, method: 'DELETE', expected: 200 });
 assert.equal((await request('/api/admin/rooms', { cookie: admin.cookie })).data.rooms.some(item => item.id === room.id), false);
 assert.equal((await request('/api/general-notes?source=general', { cookie: tools.cookie })).data.notes.length, 2);
+
+// Deletion enforces ownership, staff access and optimistic concurrency.
+await request(`/api/general-notes/${generalNote.id}`, { cookie: invited.cookie, method: 'DELETE', body: { version: 2 }, expected: 403 });
+await request(`/api/general-notes/${generalNote.id}`, { cookie: owner.cookie, method: 'DELETE', body: { version: 2 }, expected: 403 });
+await request(`/api/general-notes/${generalNote.id}`, { cookie: tools.cookie, method: 'DELETE', body: { version: 1 }, expected: 409 });
+await request(`/api/general-notes/${generalNote.id}`, { cookie: tools.cookie, method: 'DELETE', body: { version: 2 } });
+await request(`/api/general-notes/${generalNote.id}`, { cookie: admin.cookie, method: 'DELETE', body: { version: 2 }, expected: 404 });
+
+const editRoom = (await request('/api/rooms', { cookie: owner.cookie, method: 'POST', body: { name: 'Notas editáveis', committeeKey: 'unesco' }, expected: 201 })).data.room;
+const editor = await connect(editRoom.id, owner.cookie);
+await editor.inbox.next('state:init');
+editor.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 0, state: state1 }));
+await editor.inbox.next('state:ack');
+const notePath = `/api/general-notes/${encodeURIComponent(`session:${editRoom.id}:n3`)}`;
+await request(notePath, { cookie: invited.cookie, method: 'PATCH', body: { version: 1, text: 'Proibido' }, expected: 403 });
+await request(notePath, { cookie: tools.cookie, method: 'PATCH', body: { version: 1, text: '', ratings: {} }, expected: 400 });
+await request(notePath, { cookie: tools.cookie, method: 'PATCH', body: { version: 1, text: 'Discurso revisado', ratings: { diplomacy: 5 } } });
+const noteUpdate = await editor.inbox.next('state:update');
+assert.equal(noteUpdate.version, 2);
+assert.equal(noteUpdate.state.notes[2].text, 'Discurso revisado');
+assert.deepEqual(noteUpdate.state.notes[2].speech, state1.notes[2].speech);
+assert.equal(noteUpdate.state.notes[2].createdAt, state1.notes[2].createdAt);
+assert.equal(noteUpdate.state.events.at(-1).type, 'note.updated');
+await request(notePath, { cookie: tools.cookie, method: 'DELETE', body: { version: 1 }, expected: 409 });
+await request(notePath, { cookie: tools.cookie, method: 'DELETE', body: { version: 2 } });
+const noteDelete = await editor.inbox.next('state:update');
+assert.equal(noteDelete.version, 3);
+assert.equal(noteDelete.state.notes.length, 2);
+assert.equal(noteDelete.state.events.at(-1).type, 'note.deleted');
+const remaining = (await request('/api/general-notes/export?format=json&source=session', { cookie: tools.cookie })).data;
+assert.ok(!remaining.notes.some(note => note.id === `session:${editRoom.id}:n3`));
+editor.socket.close();
+await request(`/api/admin/rooms/${editRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
 
 console.log('Integration suite passed: auth roles, student restrictions, room ACL, invites, WebSocket sync/conflicts, live/final reports, admin deletion.');

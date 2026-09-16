@@ -496,6 +496,41 @@ function switchTab(name){
   renderRP();
 }
 
+let editingNote = null;
+function editNote(index){
+  if(readOnly)return;
+  const note=S.notes[index];
+  if(!note)return;
+  editingNote={id:note.id, original:JSON.stringify(note)};
+  document.getElementById('note-type').value=note.type;
+  document.getElementById('note-type').disabled=true;
+  document.getElementById('note-delegation').value=note.participant||'';
+  document.getElementById('note-delegation').disabled=true;
+  document.getElementById('note-text').value=note.text||'';
+  renderNoteTarget();
+  EVALUATION_CRITERIA.forEach(({id})=>{document.getElementById('note-score-'+id).value=note.ratings?.[id]??'';});
+  document.getElementById('note-save').textContent='Salvar alterações';
+  document.getElementById('note-cancel').hidden=false;
+  document.getElementById('note-text').focus();
+}
+function cancelNoteEdit(){
+  editingNote=null;
+  document.getElementById('note-type').disabled=readOnly;
+  document.getElementById('note-delegation').disabled=readOnly;
+  document.getElementById('note-text').value='';
+  EVALUATION_CRITERIA.forEach(({id})=>{const el=document.getElementById('note-score-'+id);if(el)el.value='';});
+  document.getElementById('note-save').textContent='Salvar nota';
+  document.getElementById('note-cancel').hidden=true;
+  renderNoteTarget();
+}
+function deleteNote(index){
+  if(readOnly||!S.notes[index]||!confirm('Excluir esta nota? Esta ação não pode ser desfeita.'))return;
+  const [note]=S.notes.splice(index,1);
+  if(editingNote?.id===note.id)cancelNoteEdit();
+  logEvent('note.deleted',{noteId:note.id});
+  save();populateNoteSelects();renderNotes();
+  document.getElementById('note-feedback').textContent='Nota excluída.';
+}
 function currentNoteSpeech(){
   const mode=S.speechMode||'gsl';
   const speaker=mode==='mod'?S.mod.spks[S.mod.cur]:mode==='solo'?{c:S.solo.code}:S.speakers[S.curIdx];
@@ -515,12 +550,12 @@ function populateNoteSelects(){
 }
 function renderNoteTarget(){
   const type=document.getElementById('note-type').value;
-  document.getElementById('note-ratings').hidden=type==='general';
+  document.getElementById('note-ratings').hidden=type==='general'&&!editingNote;
   const fields=document.getElementById('note-ratings-fields');
   if(!fields.children.length)fields.innerHTML=EVALUATION_CRITERIA.map(({id,label})=>`<label>${escapeHtml(label)}<select id="note-score-${id}"><option value="">Não avaliado</option>${[1,2,3,4,5].map(score=>`<option value="${score}">${score}</option>`).join('')}</select></label>`).join('');
   document.getElementById('note-delegation-label').hidden=type!=='delegation';
   const el=document.getElementById('note-speech-context');el.hidden=type!=='speech';
-  const speech=currentNoteSpeech();
+  const speech=editingNote?S.notes.find(note=>note.id===editingNote.id)?.speech:currentNoteSpeech();
   el.textContent=speech?`Discurso atual: ${dispName(speech.participant)} · ${{gsl:'Lista de Discursos',mod:'Moderado',solo:'Orador Único'}[speech.mode]}${speech.position?` · posição ${speech.position}`:''}`:'Nenhum orador atual. Selecione um orador na aba de discursos.';
 }
 function addNote(){
@@ -529,9 +564,17 @@ function addNote(){
   const text=document.getElementById('note-text').value.trim();
   const speech=type==='speech'?currentNoteSpeech():null;
   const participant=type==='delegation'?document.getElementById('note-delegation').value:speech?.participant||null;
-  const ratings=Object.fromEntries(EVALUATION_CRITERIA.map(({id})=>[id,type!=='general'&&document.getElementById('note-score-'+id)?.value?Number(document.getElementById('note-score-'+id).value):null]));
+  const ratings=Object.fromEntries(EVALUATION_CRITERIA.map(({id})=>[id,(type!=='general'||editingNote)&&document.getElementById('note-score-'+id)?.value?Number(document.getElementById('note-score-'+id).value):null]));
   const feedback=document.getElementById('note-feedback');
   if(!text&&!Object.values(ratings).some(value=>value!==null)){feedback.textContent='Escreva uma nota ou avalie pelo menos um critério.';return;}
+  if(text.length>10000){feedback.textContent='A nota deve ter no máximo 10.000 caracteres.';return;}
+  if(editingNote){
+    const index=S.notes.findIndex(note=>note.id===editingNote.id);
+    if(index<0||JSON.stringify(S.notes[index])!==editingNote.original){feedback.textContent='Esta nota foi alterada ou excluída. Cancele a edição e confira a versão atual.';return;}
+    S.notes[index]={...S.notes[index],text,ratings,updatedAt:new Date().toISOString()};
+    logEvent('note.updated',{noteId:editingNote.id});
+    save();cancelNoteEdit();renderNotes();feedback.textContent='Nota atualizada.';return;
+  }
   if(type!=='general'&&!participant){feedback.textContent='Selecione uma delegação ou um orador atual.';return;}
   S.notes.push({id:crypto.randomUUID(),type,text,participant,speech,ratings,createdAt:new Date().toISOString()});
   logEvent('note.added',{noteId:S.notes.at(-1).id,participant,type,activityId:speech?.activityId||null});
@@ -545,7 +588,7 @@ function noteContext(note){
 function renderNotes(){
   const participant=document.getElementById('note-filter').value;
   const notes=S.notes.filter(n=>!participant||n.participant===participant);
-  document.getElementById('notes-list').innerHTML=notes.length?notes.slice().reverse().map(n=>`<article class="saved-note"><strong>${escapeHtml(noteContext(n))}</strong><small>${escapeHtml(new Date(n.createdAt).toLocaleString('pt-BR'))}</small><p>${escapeHtml(n.text)}</p>${noteRatingsHTML(n)}</article>`).join(''):'<p>Nenhuma nota encontrada.</p>';
+  document.getElementById('notes-list').innerHTML=notes.length?notes.slice().reverse().map(n=>`<article class="saved-note"><strong>${escapeHtml(noteContext(n))}</strong><small>${escapeHtml(new Date(n.createdAt).toLocaleString('pt-BR'))}</small><p>${escapeHtml(n.text)}</p>${noteRatingsHTML(n)}${!readOnly?`<div class="note-actions"><button onclick="editNote(${S.notes.indexOf(n)})">Editar</button><button onclick="deleteNote(${S.notes.indexOf(n)})">Excluir</button></div>`:''}</article>`).join(''):'<p>Nenhuma nota encontrada.</p>';
 }
 function noteRatingsHTML(note){
   const assessed=EVALUATION_CRITERIA.filter(({id})=>note.ratings?.[id]!=null);
@@ -1506,11 +1549,13 @@ function showCurrentState(){
 }
 
 function setRoomContext(roomId){
+  if(editingNote)cancelNoteEdit();
   activeRoomId=roomId||null;
   setReadOnly(false);
 }
 
 function startFreshRoom(committeeKey){
+  if(editingNote)cancelNoteEdit();
   stopAll();
   applyingRemoteState=true;
   hydrateState(null);
@@ -1568,7 +1613,7 @@ const chairActions={
   exportCSV,registerVote,generateReport,exportSessionJSON,pickR,startVote,resetVote,
   castVote,modPP,modReset,modNext,removeModSpk,unmodPP,unmodReset,openCaucus,
   applyCaucus,soloPP,soloReset,renderRP,
-  addNote,renderNotes,renderNoteTarget,
+  addNote,editNote,deleteNote,cancelNoteEdit,renderNotes,renderNoteTarget,
 };
 
 // Keep consultation available while preventing every UI write path, including

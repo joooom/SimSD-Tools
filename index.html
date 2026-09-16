@@ -275,7 +275,8 @@
             <p id="note-speech-context" hidden></p>
             <label>Nota<textarea id="note-text" rows="4" maxlength="10000" placeholder="Escreva sua observação..."></textarea></label>
             <details id="note-ratings" hidden><summary>Avaliação da delegação (1 a 5)</summary><p>Preencha apenas os critérios observados. Os demais ficam como “Não avaliado”.</p><div id="note-ratings-fields" class="session-rating-fields"></div></details>
-            <button class="btn-primary" onclick="addNote()">Salvar nota</button>
+            <button class="btn-primary" id="note-save" onclick="addNote()">Salvar nota</button>
+            <button id="note-cancel" hidden onclick="cancelNoteEdit()">Cancelar edição</button>
             <p id="note-feedback" role="status"></p>
           </div>
           <h3>Notas salvas</h3>
