@@ -1436,13 +1436,18 @@ function openCaucus(target){
   const titMap={mod:'Configurar Sessão Moderada',unmod:'Configurar Sessão Não-Moderada'};
   document.getElementById('caucus-panel-title').textContent=titMap[target]||'Configurar Sessão';
   const ismod=target==='mod';
-  document.getElementById('cau-total').value=ismod?Math.round(S.mod.totalTotal/60):Math.round(S.unmod.total/60);
+  const tSec = ismod ? S.mod.totalTotal : S.unmod.total;
+  document.getElementById('cau-total').value=Math.floor(tSec/60);
+  document.getElementById('cau-total-s').value=tSec%60;
   document.getElementById('cau-spk').value=ismod?S.mod.spkTotal:S.config.defaultTime;
   document.getElementById('cau-spk').closest('.ip-field').style.display=ismod?'':'none';
   openPanel('caucus-panel');
 }
 function applyCaucus(){
-  const tot=parseInt(document.getElementById('cau-total').value)||15;
+  const totMin=parseInt(document.getElementById('cau-total').value)||0;
+  const totSecVal=parseInt(document.getElementById('cau-total-s').value)||0;
+  let tot = (totMin * 60) + totSecVal;
+  if(tot === 0) tot = 15 * 60;
   const spk=parseInt(document.getElementById('cau-spk').value)||60;
   if(S.caucusTarget==='mod'){
     finishActivity('mod',S.mod.spkSec,'reconfigured');finishActivity('mod-debate',S.mod.totalSec,'reconfigured');
@@ -1451,9 +1456,9 @@ function applyCaucus(){
     finishActivity('unmod',S.unmod.sec,'reconfigured');
     clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';
   }
-  logEvent('debate.configured',{mode:S.caucusTarget,totalSeconds:tot*60,speakerSeconds:S.caucusTarget==='mod'?spk:null});
-  if(S.caucusTarget==='mod'){S.mod.totalTotal=tot*60;S.mod.totalSec=tot*60;S.mod.spkTotal=spk;S.mod.spkSec=spk;updateModDisplay();}
-  else{S.unmod.total=tot*60;S.unmod.sec=tot*60;updateUnmodDisplay();}
+  logEvent('debate.configured',{mode:S.caucusTarget,totalSeconds:tot,speakerSeconds:S.caucusTarget==='mod'?spk:null});
+  if(S.caucusTarget==='mod'){S.mod.totalTotal=tot;S.mod.totalSec=tot;S.mod.spkTotal=spk;S.mod.spkSec=spk;updateModDisplay();}
+  else{S.unmod.total=tot;S.unmod.sec=tot;updateUnmodDisplay();}
   closePanel('caucus-panel');save();
 }
 

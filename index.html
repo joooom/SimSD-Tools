@@ -214,7 +214,13 @@
       <button class="ipanel-close material-icons" onclick="closePanel('caucus-panel')">close</button>
     </div>
     <div class="ip-row">
-      <div class="ip-field"><label>Duração Total (min)</label><input class="ip-inp" id="cau-total" type="number" value="15" min="1" max="120"></div>
+      <div class="ip-field">
+        <label>Duração Total (min e seg)</label>
+        <div style="display:flex;gap:5px;">
+          <input class="ip-inp" id="cau-total" type="number" value="15" min="0" max="120" placeholder="min">
+          <input class="ip-inp" id="cau-total-s" type="number" value="0" min="0" max="59" placeholder="seg">
+        </div>
+      </div>
       <div class="ip-field"><label>Tempo por Orador (seg)</label><input class="ip-inp" id="cau-spk" type="number" value="60" min="10" max="600"></div>
     </div>
     <button class="btn-enviar" onclick="applyCaucus()">Aplicar</button>
