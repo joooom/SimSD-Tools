@@ -257,9 +257,8 @@ function RoomBar({ room, user, onLeave }) {
     setConflicts(sessionSync.conflict?.conflicts || []);
     if (event.type === 'status') {
       setStatus(event.status);
-      if (event.status === 'connected') setMessage('Todas as alterações foram sincronizadas.');
+      if (event.status === 'connected') setMessage('Conectado ao vivo.');
       if (event.status === 'disconnected') { setCount(0); setMessage('Reconectando à sala…'); }
-      if (event.status === 'syncing') setMessage('Enviando alterações pendentes…');
       if (event.status === 'connecting') setMessage('Conectando à sala…');
     }
     if (event.type === 'presence') setCount(event.count);

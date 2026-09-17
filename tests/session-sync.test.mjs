@@ -1,5 +1,7 @@
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 
 let applied;
 globalThis.window = { SimSDController: { setRoomContext() {}, setReadOnly() {}, applyRemoteState(state) { applied = state; } } };
@@ -26,6 +28,47 @@ function init(state = {}, version = 0, status = 'open') {
   sessionSync.socket.receive({ type: 'state:init', state, version, room: { status } });
 }
 
+test('repeated online actions use one socket immediately with no storage writes or status changes', t => {
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  const socket = sessionSync.socket;
+  const writes = t.mock.method(localStorage, 'setItem');
+  const deletes = t.mock.method(localStorage, 'removeItem');
+  const statuses = [];
+  const unsubscribe = sessionSync.subscribe(event => { if (event.type === 'status') statuses.push(event.status); });
+  try {
+    for (let i = 1; i <= 20; i++) {
+      sessionSync.pushState({ notes: [{ id: 'n', text: String(i) }] });
+      assert.equal(socket.messages.length, i, 'send synchronously, without a debounce timer');
+      sessionSync.connect();
+      assert.equal(sessionSync.socket, socket, 'connect must not replace an open socket');
+      sessionSync.persist();
+      socket.receive({ type: 'state:ack', version: i });
+    }
+    assert.deepEqual(statuses, []);
+    assert.equal(writes.mock.callCount(), 0);
+    assert.equal(deletes.mock.callCount(), 0);
+  } finally { unsubscribe(); }
+});
+
+test('legacy chair save and remote state application never write session data locally', () => {
+  const source = readFileSync(new URL('../script.js', import.meta.url), 'utf8');
+  const save = source.slice(source.indexOf('function save(){'), source.indexOf('function logEvent('));
+  const apply = source.slice(source.indexOf('function applyRemoteState('), source.indexOf('function reportHTMLForState('));
+  let writes = 0; let sends = 0;
+  const context = {
+    readOnly: false, activeRoomId: 'room', applyingRemoteState: false,
+    sessionSnapshot: () => ({ notes: [] }), stateStorageKey: () => 'session',
+    localStorage: { setItem: () => { writes++; } },
+    window: { SimSDSync: { pushState: () => { sends++; } } },
+    stopAll() {}, hydrateState() {}, showCurrentState() {},
+  };
+  runInNewContext(`${save}\n${apply}\nsave(); applyRemoteState({notes: []});`, context);
+  assert.equal(sends, 1); assert.equal(writes, 0);
+  context.activeRoomId = null;
+  runInNewContext(`${save}\nsave();`, context);
+  assert.equal(writes, 1, 'visitor mode still stores its standalone state');
+});
+
 test('connected saves never activate the local recovery warning or outbox', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
@@ -46,7 +89,7 @@ test('offline recovery starts after exactly five seconds across connection retri
   t.mock.timers.tick(1);
   assert.equal(storage.size, 1); assert.equal(sessionSync.showLocalWarning, true);
   init({ notes: [] });
-  assert.equal(sessionSync.showLocalWarning, true, 'retain warning until server acknowledges recovery');
+  assert.equal(sessionSync.showLocalWarning, false, 'restored connection uses the direct channel');
   sessionSync.socket.receive({ type: 'state:ack', version: 1 });
   assert.equal(storage.size, 0); assert.equal(sessionSync.showLocalWarning, false);
 });
@@ -67,7 +110,7 @@ test('brief disconnection cancels grace and sends buffered edits without local w
   assert.equal(storage.size, 1); assert.equal(sessionSync.showLocalWarning, true);
 });
 
-test('flush saves the last debounced action and waits for its acknowledgement', async () => {
+test('flush waits for the acknowledgement of the directly sent action', async () => {
   sessionSync.open({ id: 'room', status: 'open' });
   init();
   const socket = sessionSync.socket;
@@ -144,9 +187,10 @@ test('lost acknowledgement is reconciled against the saved server state without 
   assert.equal(storage.size, 0);
 });
 
-test('queue restores when returning to the room and is isolated by room and user', () => {
+test('queue restores when returning to the room and is isolated by room and user', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   sessionSync.open({ id: 'r1', status: 'open' }, { userId: 1 }); init({ notes: [] });
-  sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'offline' }] }); sessionSync.close();
+  sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'offline' }] }); t.mock.timers.tick(5000); sessionSync.close();
   sessionSync.open({ id: 'r2', status: 'open' }, { userId: 1 }); assert.equal(sessionSync.dirty, false);
   sessionSync.open({ id: 'r1', status: 'open' }, { userId: 2 }); assert.equal(sessionSync.dirty, false);
   sessionSync.open({ id: 'r1', status: 'open' }, { userId: 1 });
@@ -172,9 +216,11 @@ test('conflicting edits wait for a choice and retain unrelated changes from both
   assert.equal(state.presence.Brasil, 'presente');
 });
 
-test('closed rooms retain the offline backup and send nothing until reopened', () => {
+test('closed rooms retain the offline backup and send nothing until reopened', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
   sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'offline' }] });
+  t.mock.timers.tick(5000);
   sessionSync.connect(); init({ notes: [] }, 2, 'closed');
   assert.equal(storage.size, 1); assert.equal(sessionSync.socket.messages.length, 0);
   sessionSync.socket.receive({ type: 'room:reopened', state: { notes: [] }, version: 3 });
@@ -216,7 +262,7 @@ test('simultaneous speech totals use event IDs to count both completions only on
   assert.equal(mergeSession(base, local, local).state.speeches.Brasil, 1);
 });
 
-test('send failures and ack timeouts preserve the outbox', t => {
+test('ack delays do not close a healthy socket; real drops start the grace period', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
   sessionSync.socket.send = () => { throw new Error('network'); };
@@ -224,9 +270,16 @@ test('send failures and ack timeouts preserve the outbox', t => {
   assert.equal(sessionSync.dirty, true); assert.equal(sessionSync.status, 'disconnected');
   t.mock.timers.tick(1000); init({ notes: [] });
   assert.equal(sessionSync.sending, true);
+  const socket = sessionSync.socket;
   t.mock.timers.tick(10000);
-  assert.equal(storage.size, 0, 'ack timeout starts the offline grace period');
-  t.mock.timers.tick(5000);
+  assert.equal(storage.size, 0);
+  assert.equal(sessionSync.socket, socket);
+  assert.equal(socket.readyState, WebSocket.OPEN);
+  assert.equal(sessionSync.status, 'connected');
+  socket.drop();
+  t.mock.timers.tick(4999);
+  assert.equal(storage.size, 0);
+  t.mock.timers.tick(1);
   assert.equal(sessionSync.pendingState.notes[0].id, 'n1'); assert.equal(storage.size, 1);
 });
 

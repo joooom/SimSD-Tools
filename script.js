@@ -120,10 +120,13 @@ function load(){
 function save(){
   if(readOnly)return;
   const cp=sessionSnapshot();
+  if(activeRoomId){
+    if(!applyingRemoteState)window.SimSDSync?.pushState(cp);
+    return;
+  }
   try{
     localStorage.setItem(stateStorageKey(),JSON.stringify(cp));
   }catch(e){}
-  if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
 }
 function logEvent(type,details={}){
   if(readOnly||applyingRemoteState)return null;
@@ -399,6 +402,7 @@ function loadOrderSnapshots(){
   try{ return JSON.parse(localStorage.getItem(ORDER_KEY)||'{}'); }catch(e){ return {}; }
 }
 function saveOrderSnapshot(){
+  if(activeRoomId)return;
   try{
     const all=loadOrderSnapshots();
     const key=S.committeeKey||S.committeeType||'comite';
@@ -1573,7 +1577,7 @@ function startFreshRoom(committeeKey){
     S.committeeType=cm.type;
     S.config.committee=cm.name;
   }
-  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  if(!activeRoomId)try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
   showCurrentState();
   applyingRemoteState=false;
 }
@@ -1583,7 +1587,7 @@ function applyRemoteState(snapshot){
   stopAll();
   applyingRemoteState=true;
   hydrateState(snapshot);
-  try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
+  if(!activeRoomId)try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
   showCurrentState();
   applyingRemoteState=false;
 }
