@@ -107,3 +107,14 @@ Em **Config → Projetor seguir este cliente**, o projetor acompanha as abas des
 No painel administrativo, use **Importar alterações pendentes** e selecione o JSON baixado por **Baixar cópia local**. Confira a sala, as quantidades e os conflitos na prévia, escolha quais valores preservar nos conflitos e clique em **Aplicar alterações na sala**. A operação exige admin e combina os dados com a sala original; não redireciona arquivos de salas excluídas para outra sala. Reabra sessões encerradas antes de importar. Se a sala mudar após a prévia, clique em **Analisar novamente**. A importação registra um acontecimento e atualiza os clientes conectados pelo WebSocket.
 
 A navegação usa URLs com fragmentos (por exemplo, #/notas, #/admin/pendencias e #/sala/ID/notes). Voltar/Avançar restauram a tela e a aba da sala. Ao atualizar, salas com abas sincronizadas seguem a aba atual compartilhada; salas com abas independentes e salas encerradas restauram a aba da URL, sem deslocar os demais usuários. A troca de abas mantém o mesmo WebSocket; sair pelo histórico usa a mesma proteção de alterações pendentes do botão de saída. Links continuam sujeitos ao login e às permissões da sala.
+
+
+### Atendimento por chat
+
+No **Painel admin → Pedidos de ajuda**, selecione um chamado para conversar com a sala, iniciar o atendimento, marcar como resolvido ou reabrir. É possível filtrar por status e buscar por sala/mensagem. O contador mostra mensagens não lidas por usuário.
+
+Na sala, **Ajuda → Novo pedido** vincula o chamado à sala atual; o número informado é o número físico. **Meus chamados** abre as conversas e as respostas. Pedidos feitos fora de uma sala ficam acessíveis ao solicitante e aos admins. Chamados vinculados também podem ser acessados pelo proprietário e pelos membros cadastrados na sala. Somente admins assumem/encerram; participantes podem reabrir um chamado resolvido.
+
+O histórico fica no SQLite, em tabelas criadas automaticamente ao iniciar o backend atualizado. O chat consulta mensagens por HTTP a cada 2,5 segundos e chamados a cada 3 segundos, sem depender do WebSocket da sessão. Falhas de envio preservam o texto no campo enquanto a conversa permanecer aberta; repetir o mesmo envio usa um identificador para evitar duplicação. Sem internet, é necessário reconectar para enviar/receber.
+
+O webhook continua recebendo apenas o pedido inicial, com os mesmos parâmetros `room` e `message`. Se ele falhar, o chamado permanece salvo e o painel informa que a notificação externa não foi entregue. As mensagens seguintes ficam no app. Links `#/admin/ajuda/ID` reabrem a conversa após atualizar, sujeitos ao login e às permissões.

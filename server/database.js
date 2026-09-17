@@ -65,6 +65,37 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS help_tickets (
+    id TEXT PRIMARY KEY,
+    room_id TEXT REFERENCES rooms(id) ON DELETE SET NULL,
+    room_label TEXT NOT NULL,
+    room_name TEXT,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    client_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','active','resolved')),
+    webhook_status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(created_by,client_id)
+  );
+  CREATE TABLE IF NOT EXISTS help_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES help_tickets(id) ON DELETE CASCADE,
+    sender_id INTEGER NOT NULL REFERENCES users(id),
+    sender_name TEXT NOT NULL,
+    sender_role TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(ticket_id,sender_id,client_id)
+  );
+  CREATE TABLE IF NOT EXISTS help_reads (
+    ticket_id TEXT NOT NULL REFERENCES help_tickets(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(ticket_id,user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_help_messages_ticket ON help_messages(ticket_id,id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON app_sessions(expires_at);
   CREATE TABLE IF NOT EXISTS general_notes (
     id TEXT PRIMARY KEY,

@@ -37,6 +37,7 @@ test('refresh restores room, tab and admin section from the URL', () => {
   const navigation = createNavigation(browser);
   assert.deepEqual(parseRoute(navigation.getSnapshot()), { page: 'room', roomId: 'room-123', tab: 'notes' });
   assert.deepEqual(parseRoute('#/admin/pendencias'), { page: 'admin', section: 'import' });
+  assert.deepEqual(parseRoute('#/admin/ajuda/ticket-123'), { page: 'admin', section: 'help', ticketId: 'ticket-123' });
   assert.equal(parseRoute('#/sala/room-123/bogus').tab, null);
   assert.equal(parseRoute('#/sala/../../').page, 'rooms');
 });

@@ -15,7 +15,7 @@ import { listGeneralNotes, listNoteSessions, saveGeneralNote, deleteGeneralNote,
 import { generalNotesReport, generalNotesXml } from './generalNotesReport.js';
 import { rubricOptions, consolidateRubrics, applyFinalAssessments } from './rubrics.js';
 import { buildRubricDocx } from './rubricDocx.js';
-import { sendHelpRequest } from './helpRequests.js';
+import { createHelpTicket, listHelpTickets, getHelpChat, postHelpMessage, changeHelpStatus, readHelpMessages } from './helpChat.js';
 import { serializeSessionState } from './sessionState.js';
 import { previewPendingImport } from './pendingImport.js';
 
@@ -193,7 +193,20 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, room: preview.room });
   }
   if (url.pathname === '/api/help' && method === 'POST') {
-    return sendJson(res, 200, await sendHelpRequest(await readJson(req, 8192)));
+    const input = await readJson(req, 8192);
+    if (input?.roomId != null && (typeof input.roomId !== 'string' || !input.roomId || input.roomId.length > 100)) throw Object.assign(new Error('Identificador da sala inválido.'), { status: 400 });
+    const room = input?.roomId ? roomById(input.roomId) : null;
+    if (input?.roomId && !canAccessRoom(room, user)) throw Object.assign(new Error('Sala não encontrada ou acesso negado.'), { status: 404 });
+    return sendJson(res, 200, await createHelpTicket(input, user, room));
+  }
+  if (url.pathname === '/api/help' && method === 'GET') return sendJson(res, 200, { tickets: listHelpTickets(user, url.searchParams.get('roomId')) });
+  const helpMatch = url.pathname.match(/^\/api\/help\/([a-zA-Z0-9-]+)(?:\/(messages|read))?$/);
+  if (helpMatch) {
+    const [, id, action] = helpMatch;
+    if (!action && method === 'GET') return sendJson(res, 200, getHelpChat(id, user, url.searchParams));
+    if (action === 'messages' && method === 'POST') return sendJson(res, 200, postHelpMessage(id, user, await readJson(req, 12000)));
+    if (action === 'read' && method === 'POST') return sendJson(res, 200, readHelpMessages(id, user, await readJson(req, 1024)));
+    if (!action && method === 'PATCH') return sendJson(res, 200, changeHelpStatus(id, user, await readJson(req, 1024)));
   }
   if (url.pathname === '/api/rubrics/options' || url.pathname === '/api/rubrics/preview' || url.pathname === '/api/rubrics/export') {
     if (!['admin', 'simsd_tools'].includes(user.role)) throw Object.assign(new Error('Rubricas são restritas a Tools e admins.'), { status: 403 });

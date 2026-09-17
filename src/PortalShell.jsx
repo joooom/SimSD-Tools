@@ -7,6 +7,7 @@ import licensesText from './opensource-licenses.md?raw';
 import GeneralNotes from './GeneralNotes.jsx';
 import Rubrics from './Rubrics.jsx';
 import HelpRequest from './HelpRequest.jsx';
+import { AdminHelp, useHelpTickets } from './HelpChat.jsx';
 import PendingImport from './PendingImport.jsx';
 import { COMMITTEE_NAMES } from './evaluationCriteria.js';
 import './admin.css';
@@ -66,7 +67,8 @@ function LoginScreen({ config, onVisitor }) {
   </div>;
 }
 
-function AdminDashboard({ onClose, section, setSection }) {
+function AdminDashboard({ onClose, section, setSection, user, ticketId }) {
+  const help = useHelpTickets();
   const [rooms, setRooms] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -177,8 +179,9 @@ function AdminDashboard({ onClose, section, setSection }) {
     <div className="admin-shell">
       <div className="admin-head"><div><span className="admin-eyebrow">SIMSD · ADMINISTRAÇÃO</span><h1>Painel administrativo</h1><p>Salas, relatórios e recuperação de alterações em um só lugar.</p></div><button onClick={onClose}><span className="material-icons" aria-hidden="true">arrow_back</span>Voltar às salas</button></div>
       <div className="admin-overview" aria-label="Resumo das salas">{[['', 'Todas as salas', rooms.length, 'meeting_room'], ['open', 'Em andamento', openCount, 'sensors'], ['closed', 'Encerradas', rooms.length - openCount, 'task_alt']].map(([value, label, count, icon]) => <button key={value} className={section === 'rooms' && statusFilter === value ? 'selected' : ''} aria-pressed={section === 'rooms' && statusFilter === value} onClick={() => { setSection('rooms'); setStatusFilter(value); }}><span className="material-icons" aria-hidden="true">{icon}</span><span>{label}<strong>{loading ? '—' : count}</strong></span></button>)}</div>
-      <nav className="admin-nav" aria-label="Áreas administrativas"><button aria-pressed={section === 'rooms'} onClick={() => setSection('rooms')}>Gerenciar salas</button><button aria-pressed={section === 'import'} onClick={() => setSection('import')}><span className="material-icons" aria-hidden="true">upload_file</span>Importar pendências</button></nav>
+      <nav className="admin-nav" aria-label="Áreas administrativas"><button aria-pressed={section === 'rooms'} onClick={() => setSection('rooms')}>Gerenciar salas</button><button aria-pressed={section === 'import'} onClick={() => setSection('import')}><span className="material-icons" aria-hidden="true">upload_file</span>Importar pendências</button><button aria-pressed={section === 'help'} onClick={() => setSection('help')}><span className="material-icons" aria-hidden="true">support_agent</span>Pedidos de ajuda{help.unread > 0 && <span className="help-badge">{help.unread}</span>}</button></nav>
       {error && <div className="portal-error" role="alert">{error}<button onClick={() => { setError(''); load(); }}>Tentar novamente</button></div>}
+      {section === 'help' && <AdminHelp tickets={help.tickets} error={help.error} user={user} selected={ticketId} onSelect={id => navigation.navigate(`#/admin/ajuda/${id}`)} refresh={help.refresh} />}
       <div hidden={section !== 'import'} className="admin-import-area"><PendingImport onImported={load} /></div>
       <section hidden={section !== 'rooms'} aria-label="Gerenciar salas">
         <div className="admin-toolbar"><label className="admin-search">Buscar sala<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Nome, código ou responsável" /></label><label>Comitê<select value={committeeFilter} onChange={event => setCommitteeFilter(event.target.value)}><option value="">Todos os comitês</option>{Object.entries(COMMITTEE_NAMES).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label><label>Status<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="">Todos</option><option value="open">Em andamento</option><option value="closed">Encerradas</option></select></label></div>
@@ -265,7 +268,7 @@ function Lobby({ user, onEnterRoom, route }) {
         <button onClick={() => setLicensesOpen(true)} style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: 'inherit', fontSize: '0.9em' }}>Licenças Open Source</button>
       </footer>
     </div>
-    {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} section={route.section || 'rooms'} setSection={section => navigation.navigate(section === 'import' ? '#/admin/pendencias' : '#/admin/salas')} />}
+    {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} user={user} ticketId={route.ticketId} section={route.section || 'rooms'} setSection={section => navigation.navigate({ import: '#/admin/pendencias', help: '#/admin/ajuda', rooms: '#/admin/salas' }[section])} />}
     {membersRoom && <MembersModal room={membersRoom} onClose={() => setMembersRoom(null)} />}
     {licensesOpen && <LicensesModal onClose={() => setLicensesOpen(false)} />}
   </div>;
@@ -446,5 +449,5 @@ export default function PortalShell() {
   else if (roomId && (!room || room.id !== roomId)) content = <div className="portal-overlay portal-loading"><p role={roomError ? 'alert' : undefined}>{roomError || 'Abrindo sala…'}</p>{roomError && <><button onClick={() => setRetry(value => value + 1)}>Tentar novamente</button><button onClick={() => navigation.navigate('#/salas')}>Voltar às salas</button></>}</div>;
   else if (roomId) content = <RoomBar key={room.id} room={room} user={user} onLeave={leaveRoom} />;
   else content = <Lobby user={user} route={route} onEnterRoom={enterRoom} />;
-  return <>{content}{user && !visitor && <HelpRequest inRoom={Boolean(roomId && room)} />}</>;
+  return <>{content}{user && !visitor && (!roomId || room?.id === roomId) && <HelpRequest key={roomId || 'lobby'} user={user} activeRoom={roomId ? room : null} inRoom={Boolean(roomId && room)} />}</>;
 }

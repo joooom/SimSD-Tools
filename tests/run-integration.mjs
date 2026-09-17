@@ -16,7 +16,7 @@ const webhook = createServer(async (req, res) => {
   let body = '';
   for await (const chunk of req) body += chunk;
   helpRequests.push({ url: req.url, method: req.method, type: req.headers['content-type'], body });
-  res.writeHead(200).end('{}');
+  res.writeHead(new URL(req.url, 'http://localhost').searchParams.get('message') === 'WEBHOOK_FAIL' ? 503 : 200).end('{}');
 });
 await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
 
@@ -55,7 +55,7 @@ try {
   const exitCode = await new Promise(resolve => suite.on('exit', code => resolve(code ?? 1)));
   if (exitCode !== 0) process.exitCode = exitCode;
   else {
-    assert.equal(helpRequests.length, 1);
+    assert.equal(helpRequests.length, 3);
     const sent = helpRequests[0];
     const url = new URL(sent.url, 'http://localhost');
     assert.equal(url.searchParams.get('room'), '204/A');

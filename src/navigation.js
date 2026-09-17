@@ -10,6 +10,7 @@ export function parseRoute(hash) {
   if (parts[0] === 'sala' && /^[a-zA-Z0-9-]+$/.test(parts[1] || '')) {
     return { page: 'room', roomId: parts[1], tab: roomTabs.includes(parts[2]) ? parts[2] : null };
   }
+  if (parts[0] === 'admin' && parts[1] === 'ajuda') return { page: 'admin', section: 'help', ticketId: /^[a-zA-Z0-9-]+$/.test(parts[2] || '') ? parts[2] : null };
   if (parts[0] === 'admin') return { page: 'admin', section: parts[1] === 'pendencias' ? 'import' : 'rooms' };
   if (parts[0] === 'visitante') return { page: 'visitor', tab: roomTabs.includes(parts[1]) ? parts[1] : null };
   return { page: { notas: 'notes', rubricas: 'rubrics' }[parts[0]] || 'rooms' };
