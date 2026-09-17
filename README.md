@@ -46,6 +46,14 @@ npm run build
 
 O teste integrado usa um banco isolado e valida papéis, ACL de salas, convites, sincronização WebSocket, conflitos de versão, encerramento e relatórios.
 
+## Alterações durante quedas de conexão
+
+Ao perder o WebSocket, a sala já carregada continua aceitando alterações locais. A fila é gravada no armazenamento do navegador, separada por usuário e sala, e só é apagada depois da confirmação do servidor. Notas e acontecimentos ficam no estado pendente; várias alterações consecutivas são consolidadas em um envio. Ao voltar à mesma sala com o mesmo usuário e navegador, a fila pendente é recuperada, inclusive após recarregar a página.
+
+A reconexão é automática, com tentativas a cada 1, 2, 4, 8 e até 15 segundos, e é antecipada quando o navegador sinaliza que voltou à internet. O app espera receber o estado atual da sala antes de reenviar. Alterações independentes são combinadas; notas, acontecimentos e registros com identificador são conciliados sem duplicação. Totais de discursos e de tempo de fala são combinados a partir dos acontecimentos correspondentes. Se o mesmo dado tiver alterações incompatíveis, o app mostra os valores locais e remotos e pede qual usar nos conflitos, preservando as demais alterações.
+
+O indicador mostra alterações pendentes e oferece **Baixar cópia local**. Uma sala encerrada ou excluída não recebe os registros pendentes: a cópia continua no dispositivo; uma sala reaberta pode voltar a sincronizar. Sair da sala durante uma queda preserva a fila. A exportação do servidor e o encerramento aguardam a confirmação do salvamento para não apresentar dados ainda pendentes como sincronizados. Se o armazenamento do navegador estiver indisponível ou cheio, o app avisa para manter a aba aberta ou baixar a cópia.
+
 ## Relatório avaliativo para LLM
 
 No **Painel administrativo**, cada sala possui o botão **Relatório avaliativo para LLM**. Ele baixa um arquivo XML UTF-8 com os dados salvos da sessão, participantes, todas as notas e a cronologia dos acontecimentos. A exportação funciona em salas abertas e encerradas e exige acesso de admin também no servidor (`GET /api/admin/rooms/:id/llm-report`). O arquivo pode ser anexado ao modelo de IA escolhido; o app não envia os dados a serviços de IA.
@@ -60,6 +68,24 @@ Na seleção de salas, a área **Notas gerais** é exclusiva para usuários **To
 
 As notas externas são persistidas no banco independentemente das salas, com autor e datas. O autor e admins podem editá-las ou excluí-las; alterações simultâneas são detectadas para evitar sobrescrita. Tools e admins também podem editar texto e critérios ou excluir notas de sessões abertas pela consulta centralizada, com atualização ao vivo da sala. Dentro da sala, a aba Notas oferece essas mesmas ações. O contexto e a data original da nota são preservados na edição. Sessões encerradas permanecem somente para consulta; um admin pode reabri-las para corrigir notas.
 
-Os oito critérios de avaliação aceitam valores inteiros de **1 a 5**: domínio do tema, aderência à política externa, participação nos debates, cooperação e diplomacia, elaboração da resolução, decoro, pontualidade e DPO. Cada critério é opcional; **Não avaliado** não equivale a zero. As avaliações também podem ser adicionadas às notas de delegação e discurso nas salas e são incluídas nos relatórios e exportações.
+Os critérios de avaliação aceitam valores inteiros de **1 a 5**: domínio do tema, aderência à política externa, participação nos debates, cooperação e diplomacia, elaboração da resolução, decoro, pontualidade e DPO. A categoria **DPO** mantém a nota geral e acrescenta cinco subcritérios: posicionamento sobre trabalhadores plataformizados; ações anteriores sobre o tema; posicionamento sobre o projeto de lei e o substitutivo 2; emendas propostas à audiência pública do PLP 152/2025; e respeito à estrutura do DPO no guia de estudos. Cada critério é opcional; **Não avaliado** não equivale a zero. As avaliações anteriores são preservadas, sem cálculo automático entre a nota geral de DPO e seus subcritérios. Os 13 critérios aparecem nas notas gerais, nas notas de delegação e discurso das salas e nos relatórios e exportações. No XML e JSON, os cinco novos critérios possuem `parentId: dpo` para identificar a subcategoria.
 
 O arquivo [examples/notas-gerais-mock.xml](examples/notas-gerais-mock.xml) é um exemplo geral **inteiramente fictício**, com os quatro comitês, todas as 110 delegações/representações cadastradas, oito sessões em dois dias, 330 notas e acontecimentos de exemplo. Serve para testar a leitura do relatório por uma LLM; não é um arquivo de importação de salas. Para regenerá-lo com os cadastros atuais, execute `node scripts/generate-notes-mock.mjs`. O gerador usa o mesmo serializador da exportação e não acessa o banco da aplicação.
+
+## Rubricas de avaliação
+
+A aba **Rubricas**, na página inicial de Tools e admins, gera documentos Word diretamente das pontuações registradas, sem depender de LLM, Python ou conversão manual. O modelo segue o `gerador_rubricas.py` fornecido: tabela geral com estrelas, quatro questões norteadoras específicas do comitê, estrutura do DPO e avaliação final. As perguntas nos formulários de notas também acompanham o comitê; os quatro identificadores DPO existentes são mantidos, na ordem das questões do modelo. Convém revisar avaliações anteriores dos comitês internacionais, pois antes os formulários exibiam as perguntas da Câmara.
+
+1. Selecione um ou mais comitês e marque explicitamente as sessões válidas, abertas ou encerradas. Nenhuma sessão é incluída automaticamente.
+2. Se desejar, inclua as notas fora de sessão desses comitês e/ou delegações ainda sem avaliação.
+3. Escolha **maior**, **menor** ou **última nota lançada**. A regra opera por critério e delegação dentro de cada comitê, antes de converter a escala. Campos sem pontuação são ignorados. A última lançada usa a data de criação, não a data de edição; empates de pontuação usam a data mais recente, e empates de data usam o ID do registro para garantir estabilidade.
+4. Gere a prévia, confira a nota escolhida e sua origem e, opcionalmente, preencha a avaliação final. Esses textos ficam apenas na aba atual e no arquivo baixado; não são salvos como novas notas.
+5. Baixe um DOCX geral, um DOCX por comitê ou o JSON consolidado. Mudanças nas avaliações que alterem o resultado exigem gerar outra prévia antes de baixar.
+
+A avaliação geral usa **1 a 5 estrelas**, com uma estrela por ponto. Os conceitos do DPO mantêm a conversão **1–2 → D; 3 → C; 4 → B; 5 → A**. Ausência de avaliação não vira zero nem uma estrela. A avaliação final é manual; textos livres e acontecimentos não recebem pontuações inferidas. No JSON, `ratings` e `criterios_gerais` preservam a escala de 1 a 5; `dpo_questoes` e `dpo_formatacao` usam A–D. O conversor Python original limita as estrelas a quatro; para manter cinco estrelas, use o Word gerado pelo app ou ajuste esse conversor externo.
+
+As rotas `/api/rubrics/options`, `/api/rubrics/preview` e `/api/rubrics/export` exigem Tools ou admin. A geração de Word usa a dependência Node `docx`, instalada com `npm install`/`npm ci`.
+
+## Pedidos de ajuda
+
+O botão **Pedir ajuda** fica disponível na página inicial e nas salas para usuários autenticados. Informe o número da sala física e uma mensagem curta. O backend encaminha `POST /api/help` ao webhook, com `room` e `message` na query string, `Content-Type: application/json` e corpo `{}`. O destino pode ser configurado por `SIMSD_HELP_WEBHOOK_URL`; sem configuração, usa o endereço n8n fornecido. Há limite de 80 caracteres para sala e 1000 para mensagem, com timeout de 10 segundos no backend. O formulário preserva os campos em caso de erro e bloqueia envios simultâneos. Os pedidos exigem conexão e não são reenviados automaticamente. Os testes usam um webhook local simulado.

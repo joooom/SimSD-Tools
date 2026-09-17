@@ -12,15 +12,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env server/index.js",
-    "test": "node --test tests/llm-report.test.mjs tests/session-sync.test.mjs && node tests/run-integration.mjs"
+    "test": "node --test tests/llm-report.test.mjs tests/session-sync.test.mjs tests/rubrics.test.mjs tests/help-requests.test.mjs && node tests/run-integration.mjs"
   },
   "dependencies": {
+    "docx": "^9.6.1",
     "material-icons": "^1.13.14",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "ws": "8.21.3"
   },
   "devDependencies": {
+    "jszip": "^3.10.1",
     "vite": "7.3.6"
   }
 }

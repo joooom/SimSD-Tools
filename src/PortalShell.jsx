@@ -5,6 +5,8 @@ const logoUrl = '/simsd-square.svg';
 import './collaboration.css';
 import licensesText from './opensource-licenses.md?raw';
 import GeneralNotes from './GeneralNotes.jsx';
+import Rubrics from './Rubrics.jsx';
+import HelpRequest from './HelpRequest.jsx';
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -224,8 +226,9 @@ function Lobby({ user, onEnterRoom }) {
     <div className="lobby-shell">
       <header><div className="lobby-brand"><img src={logoUrl} alt="Sim SD" /><div><h1>Salas SimSD Chair</h1><p>Sincronização ao vivo entre chairs e delegados</p></div></div><div className="user-menu"><span><strong>{user.name}</strong><small>{roleLabel(user.role)}</small></span>{user.role === 'admin' && <button onClick={() => setAdminOpen(true)}>Painel admin</button>}<button onClick={logoutNow}>Sair</button></div></header>
       {error && <div className="portal-error">{error}</div>}
-      {canUseGeneralNotes && <nav className="lobby-area-nav" aria-label="Áreas do painel"><button aria-pressed={area === 'rooms'} onClick={() => setArea('rooms')}>Salas</button><button aria-pressed={area === 'notes'} onClick={() => setArea('notes')}>Notas gerais</button></nav>}
+      {canUseGeneralNotes && <nav className="lobby-area-nav" aria-label="Áreas do painel"><button aria-pressed={area === 'rooms'} onClick={() => setArea('rooms')}>Salas</button><button aria-pressed={area === 'notes'} onClick={() => setArea('notes')}>Notas gerais</button><button aria-pressed={area === 'rubrics'} onClick={() => setArea('rubrics')}>Rubricas</button></nav>}
       {canUseGeneralNotes && area === 'notes' && <GeneralNotes />}
+      {canUseGeneralNotes && area === 'rubrics' && <Rubrics />}
       {area === 'rooms' && <div className="lobby-columns">
         {user.role !== 'student' && <section className="create-room"><h2>Criar uma sala</h2><form onSubmit={createRoom}><label>Nome da sessão<input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: UNESCO — Sessão 1" required /></label><label>Comitê<select value={committeeKey} onChange={e => setCommitteeKey(e.target.value)}><option value="camara">Câmara dos Deputados</option><option value="unodc">UNODC</option><option value="oea">OEA</option><option value="unesco">UNESCO</option></select></label><button className="portal-primary">Criar e entrar</button></form></section>}
         <section className="rooms-list" style={{ gridColumn: user.role === 'student' ? '1 / -1' : undefined }}><div className="section-head"><div><h2>Salas disponíveis</h2><p>{user.role === 'simsd_tools' ? 'Você pode entrar em qualquer sala aberta.' : 'Salas criadas por você ou para as quais foi adicionado.'}</p></div><button onClick={load}>Atualizar</button></div>
@@ -243,22 +246,40 @@ function Lobby({ user, onEnterRoom }) {
 }
 
 function RoomBar({ room, user, onLeave }) {
-  const [status, setStatus] = useState(room.status === 'closed' ? 'closed' : 'connecting');
+  const [status, setStatus] = useState(sessionSync.status);
+  const [pending, setPending] = useState(sessionSync.dirty);
+  const [conflicts, setConflicts] = useState(sessionSync.conflict?.conflicts || []);
   const [count, setCount] = useState(1);
   const [membersOpen, setMembersOpen] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => sessionSync.subscribe(event => {
-    if (event.type === 'status') setStatus(event.status);
+    setPending(sessionSync.dirty);
+    setConflicts(sessionSync.conflict?.conflicts || []);
+    if (event.type === 'status') {
+      setStatus(event.status);
+      if (event.status === 'connected') setMessage('Todas as alterações foram sincronizadas.');
+      if (event.status === 'disconnected') { setCount(0); setMessage('Sem conexão. Reconexão automática; alterações ficam pendentes neste dispositivo.'); }
+      if (event.status === 'syncing') setMessage('Enviando alterações pendentes…');
+      if (event.status === 'connecting') setMessage('Conectando à sala…');
+    }
     if (event.type === 'presence') setCount(event.count);
     if (event.type === 'remote-update') setMessage(`Atualizado por ${event.user?.name || 'outro usuário'}`);
-    if (event.type === 'closed') { setStatus('closed'); setMessage('Sessão encerrada. Relatório final disponível para admins.'); }
-    if (event.type === 'reopened') { setStatus('connected'); setMessage('Sala reaberta pelo admin.'); }
+    if (event.type === 'closed') { setStatus('closed'); setMessage(event.pending ? 'Sala encerrada. A cópia local pendente foi preservada.' : 'Sessão encerrada. Relatório final disponível para admins.'); }
+    if (event.type === 'reopened') { setStatus(sessionSync.status); setMessage('Sala reaberta pelo admin.'); }
     if (event.type === 'error') setMessage(event.message);
   }), []);
 
   const content = <><div className="mobile-room-warning"><span className="material-icons" style={{fontSize: 48, marginBottom: 16}}>warning</span><h2>Dispositivo incompatível</h2><p>O painel da sala não é suportado em dispositivos móveis. Acesse por um computador.</p><button className="portal-primary" onClick={onLeave}>Voltar às salas</button></div><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{user.role === 'admin' && sessionSync.room?.status === 'closed' && <button onClick={async () => { try { await api(`/api/rooms/${room.id}/reopen`, { method: 'POST' }); } catch (err) { setMessage(err.message); } }}>Reabrir sala</button>}{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
+  const syncControls = <>
+    {pending && <div className="sync-pending" role="status">{sessionSync.persisted ? 'Alterações guardadas neste dispositivo' : 'Alterações pendentes — mantenha a aba aberta'}<button onClick={() => sessionSync.downloadPending()}>Baixar cópia local</button></div>}
+    {conflicts.length > 0 && <div className="portal-modal-backdrop"><div className="portal-modal sync-conflicts" role="dialog" aria-modal="true" aria-label="Conflitos de sincronização">
+      <h2>Alterações simultâneas</h2><p>A sala e este dispositivo alteraram os mesmos dados. As demais alterações serão combinadas automaticamente. Escolha quais valores usar nos conflitos abaixo.</p>
+      <div className="sync-conflict-list">{conflicts.map((conflict, index) => <div key={index}><strong>{({ notes: 'Nota', events: 'Acontecimento', config: 'Configuração', agenda: 'Agenda', presence: 'Presença', votes: 'Voto', motions: 'Moção', speakers: 'Lista de oradores', timer: 'Cronômetro', speeches: 'Discursos', speakTime: 'Tempo de fala' })[conflict.path.split('.')[0]] || 'Dados da sessão'}</strong><p>Meu valor: {typeof conflict.local === 'string' ? conflict.local : JSON.stringify(conflict.local) ?? 'Excluído'}</p><p>Valor da sala: {typeof conflict.remote === 'string' ? conflict.remote : JSON.stringify(conflict.remote) ?? 'Excluído'}</p></div>)}</div>
+      <div className="room-actions"><button onClick={() => sessionSync.downloadPending()}>Baixar cópia local</button><button onClick={() => sessionSync.resolveConflict('remote')}>Usar valores da sala nos conflitos</button><button onClick={() => sessionSync.resolveConflict('local')}>Usar meus valores nos conflitos</button></div>
+    </div></div>}
+  </>;
   const slot = document.getElementById('room-bar-slot');
-  return slot ? createPortal(content, slot) : content;
+  return <>{slot ? createPortal(content, slot) : content}{createPortal(syncControls, document.body)}</>;
 }
 
 function VisitorBar({ onExit }) {
@@ -282,10 +303,12 @@ export default function PortalShell() {
   }, [visitor]);
   const enterVisitor = () => { localStorage.setItem('simsd-visitor-mode', '1'); window.SimSDOfflineMode = true; window.SimSDController?.setRoomContext(null); setVisitor(true); };
   const exitVisitor = () => { localStorage.removeItem('simsd-visitor-mode'); window.SimSDOfflineMode = false; location.reload(); };
-  const enterRoom = selectedRoom => { setRoom(selectedRoom); sessionSync.open(selectedRoom); };
+  const enterRoom = selectedRoom => { setRoom(selectedRoom); sessionSync.open(selectedRoom, { userId: user.id }); };
   const leaveRoom = async () => {
     try {
-      await sessionSync.flushPending();
+      if (sessionSync.dirty && (!sessionSync.ready || sessionSync.conflict || sessionSync.room?.status === 'closed')) {
+        if (!sessionSync.persist()) throw new Error('Não foi possível guardar a fila. Baixe a cópia local antes de sair.');
+      } else await sessionSync.flushPending();
       sessionSync.close(); window.SimSDController?.setRoomContext(null); setRoom(null);
     } catch (error) { alert(error.message); }
   };
@@ -296,5 +319,5 @@ export default function PortalShell() {
     if (!room) return <Lobby user={user} onEnterRoom={enterRoom} />;
     return <RoomBar room={room} user={user} onLeave={leaveRoom} />;
   }, [checked, config, user, room, visitor]);
-  return content;
+  return <>{content}{user && !visitor && <HelpRequest inRoom={Boolean(room)} />}</>;
 }

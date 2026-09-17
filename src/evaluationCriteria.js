@@ -13,6 +13,16 @@ export const EVALUATION_CRITERIA = [
   { id: 'decorum', label: 'Decoro' },
   { id: 'punctuality', label: 'Pontualidade' },
   { id: 'dpo', label: 'DPO' },
+  {"id":"dpoPlatformWorkers","label":"Como a representação lida e se posiciona nos debates sobre os trabalhadores plataformizados?","parentId":"dpo"},
+  {"id":"dpoPastActions","label":"O que a representação já fez em relação ao tópico de debate?","parentId":"dpo"},
+  {"id":"dpoBillPosition","label":"Qual é o posicionamento de sua representação em relação ao projeto de lei, em especial ao substitutivo 2?","parentId":"dpo"},
+  {"id":"dpoAmendments","label":"Quais são as emendas que a representação busca trazer para a audiência pública do PLP 152/2025?","parentId":"dpo"},
+  {"id":"dpoStructure","label":"O documento respeitou a estrutura do DPO explicada no guia de estudos?","parentId":"dpo"},
+];
+
+export const EVALUATION_GROUPS = [
+  { id: 'general', label: 'Avaliação geral', criteria: EVALUATION_CRITERIA.filter(item => item.id !== 'dpo' && !item.parentId) },
+  { id: 'dpo', label: 'DPO', criteria: EVALUATION_CRITERIA.filter(item => item.id === 'dpo' || item.parentId === 'dpo') },
 ];
 
 export const NOTE_KINDS = { dpo: 'DPO', observation: 'Observação geral', evaluation: 'Avaliação' };

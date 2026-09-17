@@ -62,8 +62,13 @@ const outsider = await login('student', 'Outside Student');
 const tools = await login('simsd_tools', 'Tools User');
 const admin = await login('admin', 'Admin User');
 
+await request('/api/help', { method: 'POST', body: { room: '1', message: 'Ajuda' }, expected: 401 });
+await request('/api/help', { cookie: invited.cookie, method: 'POST', body: { room: '', message: 'Ajuda' }, expected: 400 });
+assert.equal((await request('/api/help', { cookie: invited.cookie, method: 'POST', body: { room: ' 204/A ', message: ' Ajuda com áudio & projetor? ' } })).data.ok, true);
+
 // Independent notes are shared by staff, never by students or guests.
-const generalDraft = { committeeKey: 'unesco', participant: 'Brasil', type: 'dpo', text: `DPO & <análise> ${suffix}`, ratings: { dpo: 4, topicKnowledge: 5 } };
+const dpoDetails = { dpoPlatformWorkers: 1, dpoPastActions: 2, dpoBillPosition: 3, dpoAmendments: 4, dpoStructure: 5 };
+const generalDraft = { committeeKey: 'unesco', participant: 'Brasil', type: 'dpo', text: `DPO & <análise> ${suffix}`, ratings: { dpo: 4, topicKnowledge: 5, ...dpoDetails } };
 await request('/api/general-notes', { expected: 401 });
 await request('/api/general-notes/export', { expected: 401 });
 await request('/api/general-notes', { cookie: invited.cookie, expected: 403 });
@@ -78,6 +83,7 @@ for (const invalid of [
 ]) await request('/api/general-notes', { cookie: tools.cookie, method: 'POST', body: { ...generalDraft, ...invalid }, expected: 400 });
 const generalNote = (await request('/api/general-notes', { cookie: tools.cookie, method: 'POST', body: generalDraft, expected: 201 })).data.note;
 assert.equal(generalNote.ratings.dpo, 4);
+for (const [criterion, score] of Object.entries(dpoDetails)) assert.equal(generalNote.ratings[criterion], score);
 assert.equal(generalNote.ratings.decorum, null);
 assert.equal(generalNote.author.id, tools.user.id);
 assert.equal(generalNote.canEdit, true);
@@ -85,7 +91,7 @@ const sharedNote = (await request('/api/general-notes', { cookie: owner.cookie }
 assert.equal(sharedNote.canEdit, false);
 await request(`/api/general-notes/${generalNote.id}`, { cookie: owner.cookie, method: 'PATCH', body: { ...generalDraft, version: 1 }, expected: 403 });
 await request(`/api/general-notes/${generalNote.id}`, { cookie: invited.cookie, method: 'PATCH', body: { ...generalDraft, version: 1 }, expected: 403 });
-const editedNote = (await request(`/api/general-notes/${generalNote.id}`, { cookie: admin.cookie, method: 'PATCH', body: { ...generalDraft, ratings: { dpo: 5 }, version: 1 } })).data.note;
+const editedNote = (await request(`/api/general-notes/${generalNote.id}`, { cookie: admin.cookie, method: 'PATCH', body: { ...generalDraft, ratings: { dpo: 5, ...dpoDetails }, version: 1 } })).data.note;
 assert.equal(editedNote.version, 2);
 await request(`/api/general-notes/${generalNote.id}`, { cookie: tools.cookie, method: 'PATCH', body: { ...generalDraft, version: 1 }, expected: 409 });
 const ratingOnly = (await request('/api/general-notes', { cookie: tools.cookie, method: 'POST', body: { committeeKey: 'camara', participant: 'Dep. Erika Hilton', type: 'evaluation', ratings: { diplomacy: 3 } }, expected: 201 })).data.note;
@@ -94,12 +100,16 @@ const filtered = (await request('/api/general-notes?committeeKey=unesco&delegati
 assert.deepEqual(filtered.map(note => note.id), [generalNote.id]);
 const generalExport = (await request('/api/general-notes/export?format=json&committeeKey=unesco', { cookie: tools.cookie })).data;
 assert.equal(generalExport.notes.length, 1);
-assert.equal(generalExport.criteria.length, 8);
+assert.equal(generalExport.criteria.length, 13);
+assert.equal(generalExport.criteria.filter(criterion => criterion.parentId === 'dpo').length, 5);
+for (const [criterion, score] of Object.entries(dpoDetails)) assert.equal(generalExport.notes[0].ratings[criterion], score);
 assert.equal(generalExport.notes[0].ratings.dpo, 5);
 assert.equal(generalExport.notes[0].canEdit, undefined);
 const generalXmlResponse = await fetch(`${base}/api/general-notes/export?committeeKey=unesco`, { headers: { Cookie: admin.cookie } });
 assert.match(generalXmlResponse.headers.get('content-type'), /application\/xml/);
 const generalXml = await generalXmlResponse.text();
+assert.match(generalXml, /<field name="parentId">dpo<\/field>/);
+assert.match(generalXml, /<field name="dpoStructure">5<\/field>/);
 assert.match(generalXml, /DPO &amp; &lt;análise&gt;/);
 assert.match(generalXml, /Domínio do tema debatido/);
 await request('/api/general-notes/export?format=exe', { cookie: tools.cookie, expected: 400 });
@@ -261,6 +271,27 @@ const finalXml = await (await fetch(`${base}/api/admin/rooms/${room.id}/llm-repo
 assert.match(finalXml, /type="session.reopened"/);
 assert.equal((finalXml.match(/type="session.closed"/g) || []).length, 2);
 
+// Rubric routes enforce staff access and only consolidate explicitly chosen rooms.
+await request('/api/rubrics/options', { expected: 401 });
+for (const path of ['options', 'preview', 'export']) await request(`/api/rubrics/${path}`, { cookie: invited.cookie, method: path === 'options' ? 'GET' : 'POST', body: path === 'options' ? undefined : {}, expected: 403 });
+assert.ok((await request('/api/rubrics/options', { cookie: tools.cookie })).data.sessions.some(session => session.id === room.id && session.status === 'closed'));
+const rubricSelection = { committeeKeys: ['unesco'], roomIds: [room.id], priority: 'highest', includeGeneral: true, includeUnassessed: false };
+const rubricPreview = (await request('/api/rubrics/preview', { cookie: tools.cookie, method: 'POST', body: rubricSelection })).data.report;
+assert.equal(rubricPreview.delegationCount, 2);
+assert.equal(rubricPreview.comites[0].delegacoes.find(item => item.nome === 'Brasil').dpo_formatacao, 'A');
+assert.equal(rubricPreview.comites[0].delegacoes.find(item => item.nome === 'França').ratings.diplomacy, 4);
+const rubricExportBody = { ...rubricSelection, fingerprint: rubricPreview.fingerprint, finals: { 'unesco:Brasil': 'Participação consistente' }, format: 'json' };
+const rubricJson = (await request('/api/rubrics/export', { cookie: tools.cookie, method: 'POST', body: rubricExportBody })).data;
+assert.equal(rubricJson.comites[0].delegacoes.find(item => item.nome === 'Brasil').avaliacao_final, 'Participação consistente');
+const rubricDocxResponse = await fetch(`${base}/api/rubrics/export`, { method: 'POST', headers: { Cookie: tools.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...rubricExportBody, format: 'docx' }) });
+assert.equal(rubricDocxResponse.status, 200);
+assert.match(rubricDocxResponse.headers.get('content-type'), /wordprocessingml/);
+assert.equal(Buffer.from(await rubricDocxResponse.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+await request('/api/rubrics/export', { cookie: tools.cookie, method: 'POST', body: { ...rubricExportBody, fingerprint: 'outdated' }, expected: 409 });
+await request('/api/rubrics/export', { cookie: tools.cookie, method: 'POST', body: { ...rubricExportBody, committeeKey: 'oea' }, expected: 400 });
+await request('/api/rubrics/preview', { cookie: tools.cookie, method: 'POST', body: { ...rubricSelection, roomIds: ['missing'] }, expected: 400 });
+await request('/api/rubrics/preview', { cookie: tools.cookie, method: 'POST', body: { ...rubricSelection, roomIds: [], includeGeneral: false }, expected: 400 });
+
 first.socket.close();
 second.socket.close();
 
@@ -292,15 +323,55 @@ assert.equal(noteUpdate.state.notes[2].text, 'Discurso revisado');
 assert.deepEqual(noteUpdate.state.notes[2].speech, state1.notes[2].speech);
 assert.equal(noteUpdate.state.notes[2].createdAt, state1.notes[2].createdAt);
 assert.equal(noteUpdate.state.events.at(-1).type, 'note.updated');
+const beforeDeletionSelection = { ...rubricSelection, includeGeneral: false, roomIds: [editRoom.id] };
+const beforeDeletionRubrics = (await request('/api/rubrics/preview', { cookie: tools.cookie, method: 'POST', body: beforeDeletionSelection })).data.report;
 await request(notePath, { cookie: tools.cookie, method: 'DELETE', body: { version: 1 }, expected: 409 });
 await request(notePath, { cookie: tools.cookie, method: 'DELETE', body: { version: 2 } });
 const noteDelete = await editor.inbox.next('state:update');
 assert.equal(noteDelete.version, 3);
 assert.equal(noteDelete.state.notes.length, 2);
 assert.equal(noteDelete.state.events.at(-1).type, 'note.deleted');
+await request('/api/rubrics/export', { cookie: tools.cookie, method: 'POST', body: { ...beforeDeletionSelection, fingerprint: beforeDeletionRubrics.fingerprint, format: 'docx' }, expected: 409 });
 const remaining = (await request('/api/general-notes/export?format=json&source=session', { cookie: tools.cookie })).data;
 assert.ok(!remaining.notes.some(note => note.id === `session:${editRoom.id}:n3`));
 editor.socket.close();
 await request(`/api/admin/rooms/${editRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
 
-console.log('Integration suite passed: auth roles, student restrictions, room ACL, invites, WebSocket sync/conflicts, live/final reports, admin deletion.');
+// Exercise the browser sync client against real authenticated WebSockets.
+globalThis.window = { SimSDController: { setRoomContext() {}, setReadOnly() {}, applyRemoteState() {} } };
+globalThis.location = { protocol: new URL(base).protocol, host: new URL(base).host };
+const outbox = new Map();
+globalThis.localStorage = { getItem: key => outbox.get(key) || null, setItem: (key, value) => outbox.set(key, value), removeItem: key => outbox.delete(key) };
+globalThis.WebSocket = class extends WebSocket { constructor(url) { super(url, { headers: { Cookie: owner.cookie } }); } };
+const { SessionSync } = await import('../src/sessionSync.js');
+const sync = new SessionSync();
+const offlineRoom = (await request('/api/rooms', { cookie: owner.cookie, method: 'POST', body: { name: 'Reconexão real', committeeKey: 'unesco' }, expected: 201 })).data.room;
+const remoteWriter = await connect(offlineRoom.id, owner.cookie);
+await remoteWriter.inbox.next('state:init');
+const baseline = { notes: [], events: [], agenda: 'Original' };
+remoteWriter.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 0, state: baseline }));
+await remoteWriter.inbox.next('state:ack');
+function waitSync(predicate) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { unsubscribe(); reject(new Error('Timeout aguardando sincronização real')); }, 5000);
+    const unsubscribe = sync.subscribe(event => { if (predicate(event)) { clearTimeout(timer); unsubscribe(); resolve(event); } });
+  });
+}
+try {
+  const connected = waitSync(event => event.type === 'status' && event.status === 'connected');
+  sync.open(offlineRoom, { userId: owner.user.id }); await connected;
+  const disconnected = waitSync(event => event.type === 'status' && event.status === 'disconnected');
+  sync.socket.terminate(); await disconnected;
+  sync.pushState({ ...baseline, notes: [{ id: 'offline-note', text: 'Escrita sem conexão' }], events: [{ id: 'offline-event', type: 'note.added' }] }, true);
+  remoteWriter.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 1, state: { ...baseline, agenda: 'Agenda remota', notes: [{ id: 'remote-note', text: 'Escrita online' }], events: [{ id: 'remote-event', type: 'note.added' }] } }));
+  await remoteWriter.inbox.next('state:ack');
+  await waitSync(event => event.type === 'saved');
+  const actual = (await request(`/api/rooms/${offlineRoom.id}/state`, { cookie: owner.cookie })).data;
+  assert.equal(actual.version, 3);
+  assert.deepEqual(actual.state.notes.map(note => note.id).sort(), ['offline-note', 'remote-note']);
+  assert.equal(actual.state.events.length, 2); assert.equal(actual.state.agenda, 'Agenda remota');
+  assert.equal(outbox.size, 0);
+} finally { sync.close(); remoteWriter.socket.close(); }
+await request(`/api/admin/rooms/${offlineRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
+
+console.log('Integration suite passed: auth roles, student restrictions, room ACL, invites, WebSocket sync/conflicts/reconnection, live/final reports, admin deletion.');

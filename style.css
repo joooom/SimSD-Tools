@@ -929,4 +929,6 @@ select.m-inp { cursor: pointer; }
 .saved-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .room-readonly .notes-form textarea { background: #eeeae5; }
 .session-rating-fields { display: grid; gap: 10px; margin-top: 12px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); }
+.session-rating-group { grid-column: 1 / -1; display: grid; gap: 12px; }
+.session-rating-group h4 { margin: 8px 0 0; }
 .room-readonly #react-app :disabled { opacity: .55; cursor: not-allowed; }

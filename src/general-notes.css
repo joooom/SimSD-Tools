@@ -12,6 +12,8 @@
 .general-notes textarea { resize: vertical; }
 .general-notes :focus-visible { outline: 2px solid #8b1a1a; outline-offset: 2px; }
 .criteria-inputs { display: grid; gap: 12px; }
+.criteria-group { border-top: 1px solid #eeeae5; padding-top: 12px; }
+.criteria-group h5 { margin: 0 0 8px; color: #8b1a1a; }
 .criteria-inputs label { grid-template-columns: minmax(0,1fr) 130px; align-items: center; gap: 12px; }
 .general-note-actions,.general-notes-export { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 12px; }
 .general-notes-filters { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 16px 0; }

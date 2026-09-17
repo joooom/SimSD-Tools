@@ -1,0 +1,11 @@
+.help-trigger { position: fixed; right: 20px; bottom: 20px; z-index: 3500; border: 0; border-radius: 24px; background: #8b1a1a; color: white; padding: 12px 20px; font: inherit; font-weight: 700; cursor: pointer; box-shadow: 0 3px 12px #0003; }
+.help-dialog { box-sizing: border-box; width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; padding: 24px; border: 0; border-radius: 14px; background: white; color: #292524; box-shadow: 0 12px 50px #0004; }
+.help-dialog::backdrop { background: #140f0c88; }
+.help-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.help-heading h2 { margin: 0; }
+.help-heading button { font-size: 24px; border: 0; background: transparent; cursor: pointer; }
+.help-dialog form { display: grid; gap: 12px; }
+.help-dialog label { font-weight: 600; }
+.help-dialog input, .help-dialog textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 6px; font: inherit; background: white; color: #292524; }
+.help-dialog textarea { resize: vertical; }
+.help-dialog button:disabled { opacity: .6; cursor: wait; }

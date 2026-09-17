@@ -1,6 +1,7 @@
 import { CTRY, CAMARA, DELEGATIONS, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } from './src/utils/flags.js';
 import { appendSessionEvent, finishSessionActivities } from './src/sessionEvents.js';
-import { EVALUATION_CRITERIA } from './src/evaluationCriteria.js';
+import { EVALUATION_CRITERIA, EVALUATION_GROUPS } from './src/evaluationCriteria.js';
+import { rubricLabel } from './src/rubricConfig.js';
 
 /* ══════════════════════════════════════════════════════
    ALL 193 UN COUNTRIES  (code, flag, region)
@@ -118,11 +119,11 @@ function load(){
 }
 function save(){
   if(readOnly)return;
+  const cp=sessionSnapshot();
   try{
-    const cp=sessionSnapshot();
     localStorage.setItem(stateStorageKey(),JSON.stringify(cp));
-    if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
   }catch(e){}
+  if(!applyingRemoteState&&activeRoomId)window.SimSDSync?.pushState(cp);
 }
 function logEvent(type,details={}){
   if(readOnly||applyingRemoteState)return null;
@@ -552,7 +553,7 @@ function renderNoteTarget(){
   const type=document.getElementById('note-type').value;
   document.getElementById('note-ratings').hidden=type==='general'&&!editingNote;
   const fields=document.getElementById('note-ratings-fields');
-  if(!fields.children.length)fields.innerHTML=EVALUATION_CRITERIA.map(({id,label})=>`<label>${escapeHtml(label)}<select id="note-score-${id}"><option value="">Não avaliado</option>${[1,2,3,4,5].map(score=>`<option value="${score}">${score}</option>`).join('')}</select></label>`).join('');
+  if(!fields.children.length||fields.dataset.committee!==S.committeeKey){fields.dataset.committee=S.committeeKey;fields.innerHTML=EVALUATION_GROUPS.map(group=>`<section class="session-rating-group"><h4>${escapeHtml(group.label)}</h4>${group.criteria.map(({id,label})=>`<label>${escapeHtml(rubricLabel({id,label},S.committeeKey))}<select id="note-score-${id}"><option value="">Não avaliado</option>${[1,2,3,4,5].map(score=>`<option value="${score}">${score}</option>`).join('')}</select></label>`).join('')}</section>`).join('');}
   document.getElementById('note-delegation-label').hidden=type!=='delegation';
   const el=document.getElementById('note-speech-context');el.hidden=type!=='speech';
   const speech=editingNote?S.notes.find(note=>note.id===editingNote.id)?.speech:currentNoteSpeech();
@@ -591,8 +592,10 @@ function renderNotes(){
   document.getElementById('notes-list').innerHTML=notes.length?notes.slice().reverse().map(n=>`<article class="saved-note"><strong>${escapeHtml(noteContext(n))}</strong><small>${escapeHtml(new Date(n.createdAt).toLocaleString('pt-BR'))}</small><p>${escapeHtml(n.text)}</p>${noteRatingsHTML(n)}${!readOnly?`<div class="note-actions"><button onclick="editNote(${S.notes.indexOf(n)})">Editar</button><button onclick="deleteNote(${S.notes.indexOf(n)})">Excluir</button></div>`:''}</article>`).join(''):'<p>Nenhuma nota encontrada.</p>';
 }
 function noteRatingsHTML(note){
-  const assessed=EVALUATION_CRITERIA.filter(({id})=>note.ratings?.[id]!=null);
-  return assessed.length?`<ul>${assessed.map(({id,label})=>`<li>${escapeHtml(label)}: <strong>${escapeHtml(note.ratings[id])}/5</strong></li>`).join('')}</ul>`:'';
+  return EVALUATION_GROUPS.map(group=>{
+    const assessed=group.criteria.filter(({id})=>note.ratings?.[id]!=null);
+    return assessed.length?`<section><h4>${escapeHtml(group.label)}</h4><ul>${assessed.map(({id,label})=>`<li>${escapeHtml(rubricLabel({id,label},S.committeeKey))}: <strong>${escapeHtml(note.ratings[id])}/5</strong></li>`).join('')}</ul></section>`:'';
+  }).join('');
 }
 
 /* ══════════════════════════════════════════════════════

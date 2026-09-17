@@ -35,7 +35,7 @@ for (const [committeeKey, committee] of Object.entries(COMMITTEE_NAMES)) {
       if (day === 15) notes.push({
         id: `mock-dpo-${committeeKey}-${index}`, source: 'general', committeeKey, committee, participant, type: 'dpo',
         text: `MOCK — DPO fictício de ${participant}, usado apenas para testar o relatório geral.`,
-        ratings: { ...Object.fromEntries(EVALUATION_CRITERIA.map(({ id }) => [id, null])), dpo: ratings.dpo },
+        ratings: Object.fromEntries(EVALUATION_CRITERIA.map(({ id, parentId }) => [id, id === 'dpo' || parentId === 'dpo' ? ratings[id] : null])),
         createdAt: at(0), updatedAt: at(0), author: { id: 'mock-author', name: 'Avaliador fictício' }, version: 1,
       });
     });

@@ -1,0 +1,27 @@
+.rubrics { color: #302923; }
+.rubrics p { line-height: 1.6; }
+.rubrics h2,.rubrics h3 { color: #8b1a1a; }
+.rubric-selection,.rubric-preview { border: 1px solid #ded6ce; border-radius: 12px; background: #fff; padding: 22px; margin: 20px 0; min-width: 0; }
+.rubric-selection legend { font-weight: 700; padding: 0 8px; }
+.rubric-checks,.rubric-actions,.rubric-committee-heading { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.rubric-checks label,.rubric-option,.rubric-sessions label { display: flex; align-items: start; gap: 9px; line-height: 1.5; }
+.rubrics input[type="checkbox"] { width: 17px; height: 17px; flex-shrink: 0; margin-top: 3px; accent-color: #8b1a1a; }
+.rubric-sessions { max-height: 300px; overflow: auto; display: grid; gap: 12px; margin: 16px 0; padding: 12px; border: 1px solid #eee7e0; border-radius: 8px; }
+.rubrics small { display: block; color: #746a60; margin-top: 4px; }
+.rubric-option { margin: 16px 0; }
+.rubric-priority,.rubric-final { display: grid; gap: 8px; margin: 20px 0; font-weight: 600; }
+.rubrics select,.rubrics textarea { padding: 10px; border: 1px solid #d6d0c9; border-radius: 6px; font: inherit; color: inherit; background: #fff; min-width: 0; box-sizing: border-box; width: 100%; }
+.rubric-priority { max-width: 360px; }
+.rubric-committee-heading { justify-content: space-between; margin-top: 28px; }
+.rubric-delegation { border: 1px solid #e5ddd4; border-radius: 8px; margin: 12px 0; padding: 14px; }
+.rubric-delegation > summary { cursor: pointer; font-weight: 700; line-height: 1.5; }
+.rubric-table-scroll { overflow-x: auto; margin-top: 14px; }
+.rubrics table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.rubrics th,.rubrics td { padding: 10px; border: 1px solid #e5ddd4; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+.rubrics thead { background: #f4eee7; }
+.rubrics tbody th { width: 40%; font-weight: 500; }
+.rubrics td:nth-child(2) { min-width: 100px; }
+.rubrics td p { white-space: pre-wrap; }
+.rubrics :focus-visible { outline: 2px solid #8b1a1a; outline-offset: 2px; }
+.rubrics button:disabled { opacity: .6; cursor: not-allowed; }
+@media(max-width:600px) { .rubric-selection,.rubric-preview { padding: 14px; } .rubrics table { min-width: 570px; } }

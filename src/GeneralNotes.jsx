@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { COMMITTEE_NAMES, EVALUATION_CRITERIA, NOTE_KINDS, committeeDelegations } from './evaluationCriteria.js';
+import { COMMITTEE_NAMES, EVALUATION_GROUPS, NOTE_KINDS, committeeDelegations } from './evaluationCriteria.js';
 import './general-notes.css';
+import { rubricLabel } from './rubricConfig.js';
 
 const emptyForm = () => ({ committeeKey: 'unodc', participant: '', type: 'dpo', text: '', ratings: {} });
 const noteTypes = { ...NOTE_KINDS, general: 'Nota geral da sessão', delegation: 'Nota sobre a delegação', speech: 'Nota sobre o discurso' };
@@ -108,7 +109,7 @@ export default function GeneralNotes() {
             </>}
             <label>Anotação<textarea rows="5" maxLength={10000} value={form.text} onChange={event => change('text', event.target.value)} placeholder="Observações sobre o DPO ou a atuação da delegação…" /></label>
             <h4>Avaliação de 1 a 5</h4><p>Preencha apenas os critérios observados. “Não avaliado” não conta como zero.</p>
-            <div className="criteria-inputs">{EVALUATION_CRITERIA.map(criterion => <label key={criterion.id}>{criterion.label}<select value={form.ratings[criterion.id] ?? ''} onChange={event => setForm(current => ({ ...current, ratings: { ...current.ratings, [criterion.id]: event.target.value ? Number(event.target.value) : null } }))}><option value="">Não avaliado</option>{[1, 2, 3, 4, 5].map(score => <option key={score} value={score}>{score}</option>)}</select></label>)}</div>
+            {EVALUATION_GROUPS.map(group => <section key={group.id} className="criteria-group" aria-label={group.label}><h4>{group.label}</h4><div className="criteria-inputs">{group.criteria.map(criterion => <label key={criterion.id}>{rubricLabel(criterion, form.committeeKey)}<select value={form.ratings[criterion.id] ?? ''} onChange={event => setForm(current => ({ ...current, ratings: { ...current.ratings, [criterion.id]: event.target.value ? Number(event.target.value) : null } }))}><option value="">Não avaliado</option>{[1, 2, 3, 4, 5].map(score => <option key={score} value={score}>{score}</option>)}</select></label>)}</div></section>)}
             <div className="general-note-actions"><button className="portal-primary" type="submit">{saving ? 'Salvando…' : editing ? 'Salvar alterações' : 'Salvar nota e avaliação'}</button>{editing && <button type="button" onClick={reset}>Cancelar edição</button>}</div>
           </fieldset>
         </form>
@@ -137,7 +138,7 @@ export default function GeneralNotes() {
             {note.updatedAt && note.updatedAt !== note.createdAt && <p className="note-metadata">Editada em {dateLabel(note.updatedAt)}</p>}
             {note.speech && <p className="note-metadata">Discurso: {({ gsl: 'Lista geral', mod: 'Moderado', solo: 'Orador único' })[note.speech.mode] || note.speech.mode}{note.speech.position ? ` · posição ${note.speech.position}` : ''}</p>}
             {note.text && <p className="central-note-text">{note.text}</p>}
-            <dl className="criteria-scores">{EVALUATION_CRITERIA.filter(criterion => note.ratings?.[criterion.id] != null).map(criterion => <div key={criterion.id}><dt>{criterion.label}</dt><dd>{note.ratings[criterion.id]} / 5</dd></div>)}</dl>
+            {EVALUATION_GROUPS.filter(group => group.criteria.some(criterion => note.ratings?.[criterion.id] != null)).map(group => <section key={group.id} className="criteria-group"><h5>{group.label}</h5><dl className="criteria-scores">{group.criteria.filter(criterion => note.ratings?.[criterion.id] != null).map(criterion => <div key={criterion.id}><dt>{rubricLabel(criterion, note.committeeKey)}</dt><dd>{note.ratings[criterion.id]} / 5</dd></div>)}</dl></section>)}
           </article>)}
         </div>
       </section>

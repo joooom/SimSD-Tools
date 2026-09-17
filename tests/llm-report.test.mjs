@@ -3,6 +3,21 @@ import assert from 'node:assert/strict';
 import { buildLlmReport } from '../server/llmReport.js';
 import { appendSessionEvent, finishSessionActivities } from '../src/sessionEvents.js';
 import { generalNotesReport, generalNotesXml } from '../server/generalNotesReport.js';
+import { EVALUATION_CRITERIA, validateRatings } from '../server/evaluationCriteria.js';
+import { EVALUATION_CRITERIA as clientCriteria } from '../src/evaluationCriteria.js';
+
+test('DPO subcriteria preserve old evaluations and validate each optional score', () => {
+  assert.deepEqual(clientCriteria, EVALUATION_CRITERIA);
+  const children = EVALUATION_CRITERIA.filter(criterion => criterion.parentId === 'dpo');
+  assert.equal(children.length, 5);
+  const legacy = validateRatings({ dpo: 4 });
+  assert.equal(legacy.dpo, 4);
+  for (const { id } of children) {
+    assert.equal(legacy[id], null);
+    assert.equal(validateRatings({ [id]: 5 })[id], 5);
+    for (const invalid of [0, 6, 1.5, '3']) assert.throws(() => validateRatings({ [id]: invalid }));
+  }
+});
 
 const roomFor = state => ({ id: 'r1', code: 'TEST', name: 'Sala', status: 'open', session_state: JSON.stringify(state) });
 

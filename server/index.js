@@ -13,6 +13,9 @@ import { buildLlmReport } from './llmReport.js';
 import { appendSessionEvent, finishSessionActivities } from './sessionEvents.js';
 import { listGeneralNotes, listNoteSessions, saveGeneralNote, deleteGeneralNote, changeSessionNote, noteFilters } from './generalNotes.js';
 import { generalNotesReport, generalNotesXml } from './generalNotesReport.js';
+import { rubricOptions, consolidateRubrics, applyFinalAssessments } from './rubrics.js';
+import { buildRubricDocx } from './rubricDocx.js';
+import { sendHelpRequest } from './helpRequests.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -161,6 +164,34 @@ async function handleApi(req, res, url) {
   }
 
   const user = requireUser(req);
+  if (url.pathname === '/api/help' && method === 'POST') {
+    return sendJson(res, 200, await sendHelpRequest(await readJson(req, 8192)));
+  }
+  if (url.pathname === '/api/rubrics/options' || url.pathname === '/api/rubrics/preview' || url.pathname === '/api/rubrics/export') {
+    if (!['admin', 'simsd_tools'].includes(user.role)) throw Object.assign(new Error('Rubricas são restritas a Tools e admins.'), { status: 403 });
+    const sessions = listNoteSessions();
+    if (url.pathname === '/api/rubrics/options' && method === 'GET') return sendJson(res, 200, { sessions });
+    if (method !== 'POST' || url.pathname === '/api/rubrics/options') throw Object.assign(new Error('Método não permitido.'), { status: 405 });
+    const body = await readJson(req);
+    const options = rubricOptions(body, sessions);
+    const report = consolidateRubrics(listGeneralNotes(user), options, sessions);
+    if (url.pathname === '/api/rubrics/preview') return sendJson(res, 200, { report });
+    if (body.fingerprint !== report.fingerprint) throw Object.assign(new Error('As notas ou a seleção mudaram. Gere uma nova prévia antes de baixar.'), { status: 409 });
+    let finalized = applyFinalAssessments(report, body.finals);
+    if (body.committeeKey) {
+      if (!options.committeeKeys.includes(body.committeeKey)) throw Object.assign(new Error('Comitê fora da seleção.'), { status: 400 });
+      finalized = { ...finalized, comites: finalized.comites.filter(committee => committee.chave_comite === body.committeeKey) };
+    }
+    const filename = `rubricas-${body.committeeKey || 'geral'}`;
+    if (body.format === 'json') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${filename}.json"` });
+      return res.end(JSON.stringify(finalized, null, 2));
+    }
+    if (body.format !== 'docx') throw Object.assign(new Error('Formato inválido.'), { status: 400 });
+    const buffer = await buildRubricDocx(finalized);
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${filename}.docx"` });
+    return res.end(buffer);
+  }
   if (url.pathname === '/api/general-notes' || url.pathname.startsWith('/api/general-notes/')) {
     if (!['admin', 'simsd_tools'].includes(user.role)) throw Object.assign(new Error('Notas gerais são restritas a Tools e admins.'), { status: 403 });
     if (url.pathname === '/api/general-notes' && method === 'GET') {
@@ -422,21 +453,22 @@ wss.on('connection', (ws, _req, room) => {
     try {
       const message = JSON.parse(raw.toString());
       if (message.type !== 'state:update') return;
-      if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.' }));
+      const requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 100) : undefined;
+      if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.', requestId }));
       const current = roomById(room.id);
-      if (!current || current.status !== 'open') return ws.send(JSON.stringify({ type: 'error', message: 'A sala está encerrada.' }));
+      if (!current || current.status !== 'open') return ws.send(JSON.stringify({ type: 'error', message: 'A sala está encerrada.', requestId }));
       if (Number(message.baseVersion) !== current.state_version) {
         return ws.send(JSON.stringify({
-          type: 'state:conflict', state: JSON.parse(current.session_state || 'null'), version: current.state_version,
+          type: 'state:conflict', state: JSON.parse(current.session_state || 'null'), version: current.state_version, requestId,
         }));
       }
       const serialized = JSON.stringify(message.state);
-      if (serialized.length > 2_000_000) return ws.send(JSON.stringify({ type: 'error', message: 'Estado da sessão muito grande.' }));
+      if (serialized.length > 2_000_000) return ws.send(JSON.stringify({ type: 'error', message: 'Estado da sessão muito grande.', requestId }));
       const version = current.state_version + 1;
       const updatedAt = nowIso();
       db.prepare('UPDATE rooms SET session_state=?,state_version=?,updated_at=? WHERE id=?').run(serialized, version, updatedAt, room.id);
       const payload = { type: 'state:update', state: message.state, version, updatedBy: publicUser(ws.simsdUser), updatedAt };
-      ws.send(JSON.stringify({ type: 'state:ack', version, updatedAt }));
+      ws.send(JSON.stringify({ type: 'state:ack', version, updatedAt, requestId }));
       broadcast(room.id, payload, ws);
     } catch {
       ws.send(JSON.stringify({ type: 'error', message: 'Mensagem WebSocket inválida.' }));
