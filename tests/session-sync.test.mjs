@@ -26,6 +26,47 @@ function init(state = {}, version = 0, status = 'open') {
   sessionSync.socket.receive({ type: 'state:init', state, version, room: { status } });
 }
 
+test('connected saves never activate the local recovery warning or outbox', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  sessionSync.pushState({ notes: [{ id: 'online' }] }, true);
+  t.mock.timers.tick(5000);
+  assert.equal(sessionSync.showLocalWarning, false);
+  assert.equal(storage.size, 0);
+  sessionSync.socket.receive({ type: 'state:ack', version: 1 });
+  assert.equal(sessionSync.dirty, false);
+});
+
+test('offline recovery starts after exactly five seconds across connection retries', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'offline' }] });
+  t.mock.timers.tick(4999);
+  assert.equal(storage.size, 0); assert.equal(sessionSync.showLocalWarning, false);
+  t.mock.timers.tick(1);
+  assert.equal(storage.size, 1); assert.equal(sessionSync.showLocalWarning, true);
+  init({ notes: [] });
+  assert.equal(sessionSync.showLocalWarning, true, 'retain warning until server acknowledges recovery');
+  sessionSync.socket.receive({ type: 'state:ack', version: 1 });
+  assert.equal(storage.size, 0); assert.equal(sessionSync.showLocalWarning, false);
+});
+
+test('brief disconnection cancels grace and sends buffered edits without local warning', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'brief' }] });
+  t.mock.timers.tick(1000); init({ notes: [] });
+  assert.equal(sessionSync.socket.messages[0].state.notes[0].id, 'brief');
+  t.mock.timers.tick(4000);
+  assert.equal(sessionSync.showLocalWarning, false); assert.equal(storage.size, 0);
+  sessionSync.socket.receive({ type: 'state:ack', version: 1 });
+  sessionSync.socket.drop(); t.mock.timers.tick(4999);
+  assert.equal(sessionSync.offlineMode, false, 'a new outage gets its own full grace period');
+  t.mock.timers.tick(1);
+  sessionSync.pushState({ notes: [{ id: 'after-grace' }] });
+  assert.equal(storage.size, 1); assert.equal(sessionSync.showLocalWarning, true);
+});
+
 test('flush saves the last debounced action and waits for its acknowledgement', async () => {
   sessionSync.open({ id: 'room', status: 'open' });
   init();
@@ -66,12 +107,14 @@ test('failed saves reject flush rather than reporting a successful export', asyn
   sessionSync.close();
 });
 
-test('offline edits survive reconnection and merge independent remote notes without duplicates', () => {
+test('offline edits survive reconnection and merge independent remote notes without duplicates', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   sessionSync.open({ id: 'room', status: 'open' }, { userId: 1 });
   const base = { notes: [], events: [], agenda: 'Original' };
   init(base, 4);
   sessionSync.socket.drop();
   sessionSync.pushState({ ...base, notes: [{ id: 'local', text: 'Offline' }], events: [{ id: 'event-local' }] }, true);
+  t.mock.timers.tick(5000);
   assert.equal(storage.size, 1);
   sessionSync.connect();
   const socket = sessionSync.socket;
@@ -182,6 +225,8 @@ test('send failures and ack timeouts preserve the outbox', t => {
   t.mock.timers.tick(1000); init({ notes: [] });
   assert.equal(sessionSync.sending, true);
   t.mock.timers.tick(10000);
+  assert.equal(storage.size, 0, 'ack timeout starts the offline grace period');
+  t.mock.timers.tick(5000);
   assert.equal(sessionSync.pendingState.notes[0].id, 'n1'); assert.equal(storage.size, 1);
 });
 

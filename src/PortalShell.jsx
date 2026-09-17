@@ -247,18 +247,18 @@ function Lobby({ user, onEnterRoom }) {
 
 function RoomBar({ room, user, onLeave }) {
   const [status, setStatus] = useState(sessionSync.status);
-  const [pending, setPending] = useState(sessionSync.dirty);
+  const [pending, setPending] = useState(sessionSync.showLocalWarning);
   const [conflicts, setConflicts] = useState(sessionSync.conflict?.conflicts || []);
   const [count, setCount] = useState(1);
   const [membersOpen, setMembersOpen] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => sessionSync.subscribe(event => {
-    setPending(sessionSync.dirty);
+    setPending(sessionSync.showLocalWarning);
     setConflicts(sessionSync.conflict?.conflicts || []);
     if (event.type === 'status') {
       setStatus(event.status);
       if (event.status === 'connected') setMessage('Todas as alterações foram sincronizadas.');
-      if (event.status === 'disconnected') { setCount(0); setMessage('Sem conexão. Reconexão automática; alterações ficam pendentes neste dispositivo.'); }
+      if (event.status === 'disconnected') { setCount(0); setMessage('Reconectando à sala…'); }
       if (event.status === 'syncing') setMessage('Enviando alterações pendentes…');
       if (event.status === 'connecting') setMessage('Conectando à sala…');
     }

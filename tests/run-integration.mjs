@@ -1,6 +1,15 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
+import { cp, copyFile, mkdtemp, symlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+// Run the real backend without src/, matching the production packaging boundary.
+const runtimeDir = await mkdtemp(join(tmpdir(), 'simsd-runtime-test-'));
+await cp('server', join(runtimeDir, 'server'), { recursive: true });
+await copyFile('package.json', join(runtimeDir, 'package.json'));
+await symlink(resolve('node_modules'), join(runtimeDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
 
 const helpRequests = [];
 const webhook = createServer(async (req, res) => {
@@ -14,10 +23,11 @@ await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
 const port = 4200 + Math.floor(Math.random() * 500);
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.execPath, ['server/index.js'], {
-  cwd: process.cwd(),
+  cwd: runtimeDir,
   env: {
     ...process.env,
     PORT: String(port),
+    HOST: '127.0.0.1',
     SIMSD_DEV_AUTH: '1',
     SIMSD_HELP_WEBHOOK_URL: `http://127.0.0.1:${webhook.address().port}/help`,
     SIMSD_DATABASE_PATH: `data/integration-${Date.now()}.sqlite`,
@@ -26,6 +36,7 @@ const server = spawn(process.execPath, ['server/index.js'], {
 });
 
 let serverOutput = '';
+const serverExited = new Promise(resolve => server.once('exit', resolve));
 server.stdout.on('data', chunk => { serverOutput += chunk; });
 server.stderr.on('data', chunk => { serverOutput += chunk; });
 
@@ -55,6 +66,8 @@ try {
   }
 } finally {
   server.kill();
+  await serverExited;
   webhook.closeAllConnections();
   webhook.close();
+  await rm(runtimeDir, { recursive: true, force: true });
 }
