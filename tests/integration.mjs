@@ -61,6 +61,8 @@ const invited = await login('student', 'Invited Student');
 const outsider = await login('student', 'Outside Student');
 const tools = await login('simsd_tools', 'Tools User');
 const admin = await login('admin', 'Admin User');
+assert.equal((await request('/api/me', { cookie: 'broken=%ZZ; simsd_session=%ZZ' })).data.user, null);
+assert.equal((await request('/api/me', { cookie: `broken=%ZZ; ${owner.cookie}` })).data.user.id, owner.user.id);
 
 await request('/api/help', { method: 'POST', body: { room: '1', message: 'Ajuda' }, expected: 401 });
 await request('/api/help', { cookie: invited.cookie, method: 'POST', body: { room: '', message: 'Ajuda' }, expected: 400 });
@@ -167,6 +169,34 @@ const state2 = { ...state1, agenda: 'Agenda sincronizada', speeches: { Brasil: 3
 second.socket.send(JSON.stringify({ type: 'state:update', state: state2, baseVersion: 1 }));
 assert.equal((await second.inbox.next('state:ack')).version, 2);
 assert.equal((await first.inbox.next('state:update')).state.agenda, 'Agenda sincronizada');
+// Invalid snapshots cannot replace the last valid state or increment its version.
+for (const state of [null, [], 'invalid', { notes: {} }, { notes: [null] }, { events: 'invalid' }, { config: [] }, { agenda: 'á'.repeat(1_000_001) }]) {
+  first.socket.send(JSON.stringify({ type: 'state:update', state, baseVersion: 2, requestId: 'invalid-state' }));
+  assert.equal((await first.inbox.next('error')).requestId, 'invalid-state');
+}
+first.socket.send(JSON.stringify({ type: 'state:request', requestId: 'snapshot-check' }));
+const snapshotCheck = await first.inbox.next('state:snapshot');
+assert.equal(snapshotCheck.requestId, 'snapshot-check');
+assert.equal(snapshotCheck.version, 2);
+assert.deepEqual(snapshotCheck.state, state2);
+
+// A ws frame exceeding maxPayload must close only that connection, not Node.
+const oversized = await connect(room.id, owner.cookie);
+await oversized.inbox.next('state:init');
+const oversizedClosed = new Promise(resolve => oversized.socket.once('close', resolve));
+oversized.socket.send('x'.repeat(2_500_001));
+await oversizedClosed;
+await request('/api/config');
+assert.equal((await request(`/api/rooms/${room.id}/state`, { cookie: owner.cookie })).data.version, 2);
+
+const expiredUser = await login('simsd_tools', 'Logout Socket');
+const expired = await connect(room.id, expiredUser.cookie);
+await expired.inbox.next('state:init');
+await request('/api/logout', { cookie: expiredUser.cookie, method: 'POST' });
+const expiredClosed = new Promise(resolve => expired.socket.once('close', resolve));
+expired.socket.send(JSON.stringify({ type: 'state:update', state: {}, baseVersion: 2 }));
+assert.match((await expired.inbox.next('error')).message, /expirou/);
+await expiredClosed;
 const centralNotes = (await request('/api/general-notes?committeeKey=unesco', { cookie: tools.cookie })).data.notes;
 assert.equal(centralNotes.length, 4);
 assert.equal(centralNotes.filter(note => note.source === 'session').length, 3);
@@ -225,8 +255,10 @@ for (const note of state1.notes) assert.ok(llmXml.includes(note.text));
 await request(`/api/rooms/${room.id}/close`, { cookie: invited.cookie, method: 'POST', body: {}, expected: 403 });
 
 const finalState = { ...state2, sessionEnded: true, speeches: { Brasil: 4, França: 1 } };
+await request(`/api/rooms/${room.id}/close`, { cookie: owner.cookie, method: 'POST', body: { state: [], baseVersion: 2 }, expected: 400 });
+await request(`/api/rooms/${room.id}/close`, { cookie: owner.cookie, method: 'POST', body: { state: state1, baseVersion: 1 }, expected: 409 });
 const closed = (await request(`/api/rooms/${room.id}/close`, {
-  cookie: owner.cookie, method: 'POST', body: { state: finalState },
+  cookie: owner.cookie, method: 'POST', body: { state: finalState, baseVersion: 2 },
 })).data.report;
 assert.equal(closed.type, 'final');
 assert.equal(closed.summary.speeches, 5);
@@ -264,7 +296,7 @@ const resumedState = { ...reopenedEvent.state, agenda: 'Sessão retomada' };
 first.socket.send(JSON.stringify({ type: 'state:update', state: resumedState, baseVersion: reopenedEvent.version }));
 assert.equal((await first.inbox.next('state:ack')).version, reopenedEvent.version + 1);
 assert.equal((await second.inbox.next('state:update')).state.agenda, resumedState.agenda);
-const reclosed = (await request(`/api/rooms/${room.id}/close`, { cookie: admin.cookie, method: 'POST', body: { state: resumedState } })).data.report;
+const reclosed = (await request(`/api/rooms/${room.id}/close`, { cookie: admin.cookie, method: 'POST', body: {} })).data.report;
 assert.equal(reclosed.session.agenda, resumedState.agenda);
 assert.deepEqual(reclosed.notes, state1.notes);
 const finalXml = await (await fetch(`${base}/api/admin/rooms/${room.id}/llm-report`, { headers: { Cookie: admin.cookie } })).text();

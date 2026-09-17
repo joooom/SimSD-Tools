@@ -16,6 +16,7 @@ import { generalNotesReport, generalNotesXml } from './generalNotesReport.js';
 import { rubricOptions, consolidateRubrics, applyFinalAssessments } from './rubrics.js';
 import { buildRubricDocx } from './rubricDocx.js';
 import { sendHelpRequest } from './helpRequests.js';
+import { serializeSessionState } from './sessionState.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -305,10 +306,12 @@ async function handleApi(req, res, url) {
     if (action === 'close' && method === 'POST') {
       if (!canManageRoom(room, user)) throw Object.assign(new Error('Apenas o criador ou um admin pode encerrar a sala.'), { status: 403 });
       const body = await readJson(req);
-      if (room.status === 'closed') return sendJson(res, 200, { report: closeRoom(room, user) });
-      if (body.state && typeof body.state === 'object') {
-        const serialized = JSON.stringify(body.state);
-        if (serialized.length > 2_000_000) throw Object.assign(new Error('Estado da sessão muito grande.'), { status: 413 });
+      const current = roomById(room.id);
+      if (!current) throw Object.assign(new Error('Sala não encontrada.'), { status: 404 });
+      if (current.status === 'closed') return sendJson(res, 200, { report: closeRoom(current, user) });
+      if (body && Object.hasOwn(body, 'state')) {
+        const serialized = serializeSessionState(body.state);
+        if (body.baseVersion !== current.state_version) throw Object.assign(new Error('A sessão mudou. Atualize os dados antes de encerrar.'), { status: 409 });
         db.prepare('UPDATE rooms SET session_state=?,state_version=state_version+1,updated_at=? WHERE id=?')
           .run(serialized, nowIso(), room.id);
       }
@@ -438,6 +441,8 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 wss.on('connection', (ws, _req, room) => {
+  // ws emits error for oversized/invalid frames; without a listener Node exits.
+  ws.on('error', () => ws.terminate());
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
@@ -450,28 +455,41 @@ wss.on('connection', (ws, _req, room) => {
   broadcastPresence(room.id);
 
   ws.on('message', raw => {
+    let requestId;
     try {
       const message = JSON.parse(raw.toString());
-      if (message.type !== 'state:update') return;
-      const requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 100) : undefined;
-      if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.', requestId }));
+      if (!message || !['state:update', 'state:request'].includes(message.type)) return;
+      requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 100) : undefined;
       const current = roomById(room.id);
+      if (!ws.simsdViewer) {
+        const user = getAuthenticatedUser(_req);
+        if (!user || !current || !canAccessRoom(current, user)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Sua sessão expirou ou o acesso foi removido.', requestId }));
+          ws.close(1008, 'Acesso expirado');
+          return;
+        }
+        ws.simsdUser = user;
+      }
+      if (message.type === 'state:request') {
+        if (current) ws.send(JSON.stringify({ type: 'state:snapshot', state: JSON.parse(current.session_state || 'null'), version: current.state_version, status: current.status, requestId }));
+        return;
+      }
+      if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.', requestId }));
       if (!current || current.status !== 'open') return ws.send(JSON.stringify({ type: 'error', message: 'A sala está encerrada.', requestId }));
       if (Number(message.baseVersion) !== current.state_version) {
         return ws.send(JSON.stringify({
           type: 'state:conflict', state: JSON.parse(current.session_state || 'null'), version: current.state_version, requestId,
         }));
       }
-      const serialized = JSON.stringify(message.state);
-      if (serialized.length > 2_000_000) return ws.send(JSON.stringify({ type: 'error', message: 'Estado da sessão muito grande.', requestId }));
+      const serialized = serializeSessionState(message.state);
       const version = current.state_version + 1;
       const updatedAt = nowIso();
       db.prepare('UPDATE rooms SET session_state=?,state_version=?,updated_at=? WHERE id=?').run(serialized, version, updatedAt, room.id);
       const payload = { type: 'state:update', state: message.state, version, updatedBy: publicUser(ws.simsdUser), updatedAt };
       ws.send(JSON.stringify({ type: 'state:ack', version, updatedAt, requestId }));
       broadcast(room.id, payload, ws);
-    } catch {
-      ws.send(JSON.stringify({ type: 'error', message: 'Mensagem WebSocket inválida.' }));
+    } catch (error) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', message: error.status ? error.message : 'Mensagem WebSocket inválida.', requestId }));
     }
   });
   ws.on('close', () => {

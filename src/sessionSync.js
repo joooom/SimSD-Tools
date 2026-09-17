@@ -108,6 +108,15 @@ export class SessionSync {
         this.pushState(window.SimSDController?.snapshot(), true);
       }
       if (!this.conflict) this.setStatus('connected');
+    } else if (message.type === 'state:snapshot') {
+      if (!this.sending || message.requestId !== this.requestId || message.version < this.version) return;
+      if (message.status === 'closed') return this.closed(message);
+      if (sameState(message.state, this.inFlightState)) {
+        // This request was accepted. Newer local edits build on it rather than
+        // conflicting with our own previously sent changes.
+        return this.receive({ type: 'state:ack', version: message.version, requestId: message.requestId });
+      }
+      this.reconcile(message.state, message.version);
     } else if (message.type === 'state:update' || message.type === 'state:conflict') {
       if (message.type === 'state:conflict' && message.requestId && message.requestId !== this.requestId) return;
       if (message.version < this.version) return;
@@ -122,7 +131,7 @@ export class SessionSync {
       if (!this.dirty) { this.setStatus('connected'); this.emit({ type: 'saved' }); }
     } else if (message.type === 'room:closed') this.closed(message);
     else if (message.type === 'room:reopened') {
-      this.room.status = 'open'; window.SimSDController?.setReadOnly?.(false);
+      this.room.status = 'open'; window.SimSDController?.setReadOnly?.(this.options.mode === 'viewer');
       this.reconcile(message.state, message.version); this.emit({ type: 'reopened' });
     } else if (message.type === 'room:deleted') {
       this.closed(message);
@@ -189,7 +198,14 @@ export class SessionSync {
       this.socket.send(JSON.stringify({ type: 'state:update', state: this.inFlightState, baseVersion: this.version, requestId: this.requestId }));
       this.ackTimer = setTimeout(() => {
         if (this.socket?.readyState !== WebSocket.OPEN) return this.disconnected();
-        this.emit({ type: 'error', message: 'O servidor ainda não confirmou as alterações. A conexão permanece aberta; aguardando resposta.' });
+        // Recover a lost acknowledgement over this same connection, without
+        // writing to local storage or blindly replaying an accepted update.
+        try { this.socket.send(JSON.stringify({ type: 'state:request', requestId: this.requestId })); }
+        catch { return this.disconnected(); }
+        this.ackTimer = setTimeout(() => {
+          if (this.socket?.readyState !== WebSocket.OPEN) return this.disconnected();
+          this.emit({ type: 'error', message: 'O servidor ainda não confirmou as alterações. A conexão permanece aberta; aguardando resposta.' });
+        }, 10000);
       }, 10000);
     } catch { this.disconnected(); }
   }

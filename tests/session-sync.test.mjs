@@ -294,3 +294,46 @@ test('stale acknowledgements do not clear a new merged request', () => {
   sessionSync.socket.receive({ type: 'state:ack', version: 2, requestId: newId });
   assert.equal(sessionSync.dirty, false);
 });
+
+test('lost acknowledgement recovers over the same socket without replaying committed changes', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  const socket = sessionSync.socket;
+  const state = { notes: [{ id: 'committed' }] };
+  sessionSync.pushState(state);
+  t.mock.timers.tick(10000);
+  const probe = socket.messages.at(-1);
+  assert.equal(probe.type, 'state:request');
+  socket.receive({ type: 'state:snapshot', state, version: 1, status: 'open', requestId: probe.requestId });
+  assert.equal(sessionSync.dirty, false);
+  assert.equal(sessionSync.socket, socket);
+  assert.equal(storage.size, 0);
+  assert.equal(socket.messages.filter(message => message.type === 'state:update').length, 1);
+});
+
+test('viewer remains read-only after a room is reopened', t => {
+  const readOnly = t.mock.method(window.SimSDController, 'setReadOnly');
+  sessionSync.open({ id: 'room', status: 'closed' }, { mode: 'viewer' });
+  init({ notes: [] }, 1, 'closed');
+  sessionSync.socket.receive({ type: 'room:reopened', state: { notes: [] }, version: 2 });
+  assert.equal(readOnly.mock.calls.at(-1).arguments[0], true);
+  sessionSync.pushState({ notes: [{ id: 'forbidden' }] });
+  assert.equal(sessionSync.socket.messages.length, 0);
+});
+
+test('snapshot acknowledgement does not conflict with newer edits to the same note', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [{ id: 'n', text: 'A' }] });
+  const accepted = { notes: [{ id: 'n', text: 'B' }] };
+  sessionSync.pushState(accepted);
+  sessionSync.pushState({ notes: [{ id: 'n', text: 'C' }] });
+  t.mock.timers.tick(10000);
+  const socket = sessionSync.socket;
+  socket.receive({ type: 'state:snapshot', state: accepted, version: 1, status: 'open', requestId: sessionSync.requestId });
+  assert.equal(sessionSync.conflict, null);
+  assert.equal(socket.messages.at(-1).state.notes[0].text, 'C');
+  assert.equal(socket.messages.at(-1).baseVersion, 1);
+  socket.receive({ type: 'state:ack', version: 2, requestId: sessionSync.requestId });
+  assert.equal(sessionSync.dirty, false);
+  assert.equal(storage.size, 0);
+});

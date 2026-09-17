@@ -89,3 +89,9 @@ As rotas `/api/rubrics/options`, `/api/rubrics/preview` e `/api/rubrics/export` 
 ## Pedidos de ajuda
 
 O botão **Pedir ajuda** fica disponível na página inicial e nas salas para usuários autenticados. Informe o número da sala física e uma mensagem curta. O backend encaminha `POST /api/help` ao webhook, com `room` e `message` na query string, `Content-Type: application/json` e corpo `{}`. O destino pode ser configurado por `SIMSD_HELP_WEBHOOK_URL`; sem configuração, usa o endereço n8n fornecido. Há limite de 80 caracteres para sala e 1000 para mensagem, com timeout de 10 segundos no backend. O formulário preserva os campos em caso de erro e bloqueia envios simultâneos. Os pedidos exigem conexão e não são reenviados automaticamente. Os testes usam um webhook local simulado.
+
+## Validação de estado e encerramento
+
+O backend valida a estrutura básica do estado recebido e limita seu tamanho a 2 MB em UTF-8 antes de gravar. Quadros WebSocket maiores que o limite encerram somente a conexão responsável. Após logout ou expiração da autenticação, o socket não pode enviar novas alterações.
+
+O app encerra a sala com `POST /api/rooms/:id/close` e corpo `{}`, depois da confirmação dos envios. Integrações que incluam `state` nesse endpoint também devem enviar `baseVersion` correspondente à versão atual; versões antigas retornam 409 sem sobrescrever a sessão. Quando uma confirmação demora, o cliente consulta o estado pelo próprio WebSocket, sem fechar uma conexão aberta nem gravar localmente.

@@ -30,9 +30,11 @@ function appendCookie(res, value) {
 }
 
 export function parseCookies(req) {
-  return Object.fromEntries((req.headers.cookie || '').split(';').filter(Boolean).map(part => {
+  return Object.fromEntries((req.headers.cookie || '').split(';').filter(Boolean).flatMap(part => {
     const index = part.indexOf('=');
-    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))];
+    if (index <= 0) return [];
+    try { return [[part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))]]; }
+    catch { return []; }
   }));
 }
 

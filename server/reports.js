@@ -1,7 +1,10 @@
 import { db, nowIso } from './database.js';
 
 function parseState(room) {
-  try { return JSON.parse(room.session_state || '{}'); } catch { return {}; }
+  try {
+    const state = JSON.parse(room.session_state || '{}');
+    return state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+  } catch { return {}; }
 }
 
 export function buildReport(room, type = 'partial') {

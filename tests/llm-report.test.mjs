@@ -1,5 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { buildReport } from '../server/reports.js';
+
+test('empty or invalid legacy snapshots produce an empty administrative report', () => {
+  for (const session_state of ['null', '[]', '"legacy"', '{invalid']) {
+    const report = buildReport({ id: 'empty', session_state });
+    assert.equal(report.summary.participants, 0);
+    assert.deepEqual(report.notes, []);
+  }
+});
 import { buildLlmReport } from '../server/llmReport.js';
 import { appendSessionEvent, finishSessionActivities } from '../src/sessionEvents.js';
 import { generalNotesReport, generalNotesXml } from '../server/generalNotesReport.js';

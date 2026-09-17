@@ -262,6 +262,7 @@ function RoomBar({ room, user, onLeave }) {
       if (event.status === 'connecting') setMessage('Conectando à sala…');
     }
     if (event.type === 'presence') setCount(event.count);
+    if (event.type === 'saved' && sessionSync.status === 'connected') setMessage('Conectado ao vivo.');
     if (event.type === 'remote-update') setMessage(`Atualizado por ${event.user?.name || 'outro usuário'}`);
     if (event.type === 'closed') { setStatus('closed'); setMessage(event.pending ? 'Sala encerrada. A cópia local pendente foi preservada.' : 'Sessão encerrada. Relatório final disponível para admins.'); }
     if (event.type === 'reopened') { setStatus(sessionSync.status); setMessage('Sala reaberta pelo admin.'); }
