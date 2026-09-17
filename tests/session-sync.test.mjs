@@ -57,6 +57,7 @@ test('legacy chair save and remote state application never write session data lo
   let writes = 0; let sends = 0;
   const context = {
     readOnly: false, activeRoomId: 'room', applyingRemoteState: false,
+    currentTab: () => 'gsl', S: { config: {} }, localActiveTab: null,
     sessionSnapshot: () => ({ notes: [] }), stateStorageKey: () => 'session',
     localStorage: { setItem: () => { writes++; } },
     window: { SimSDSync: { pushState: () => { sends++; } } },
@@ -67,6 +68,53 @@ test('legacy chair save and remote state application never write session data lo
   context.activeRoomId = null;
   runInNewContext(`${save}\nsave();`, context);
   assert.equal(writes, 1, 'visitor mode still stores its standalone state');
+});
+
+test('independent tabs stay local across shared edits and resume synchronization when disabled', () => {
+  const source = readFileSync(new URL('../script.js', import.meta.url), 'utf8');
+  const current = source.match(/function currentTab\(\)\{[^\n]+/)[0];
+  const tabs = source.slice(source.indexOf('function switchTab('), source.indexOf('let editingNote ='));
+  const apply = source.slice(source.indexOf('function applyRemoteState('), source.indexOf('function reportHTMLForState('));
+  function client() {
+    const nodes = new Map();
+    const ctx = {
+      S: { config: { independentTabs: true }, activeTab: 'gsl', speechMode: 'gsl', notes: [] },
+      activeRoomId: 'room', localActiveTab: null, readOnly: false, applyingRemoteState: false,
+      saves: 0, save() { ctx.saves++; },
+      document: {
+        querySelectorAll: () => [],
+        getElementById: id => {
+          if (!nodes.has(id)) nodes.set(id, { style: {}, classList: { add() {} } });
+          return nodes.get(id);
+        },
+      },
+      stopAll() {}, hydrateState(state) { ctx.S = structuredClone(state); },
+      showCurrentState() { runInNewContext('switchTab(currentTab())', ctx); },
+      populateNoteSelects() {}, renderNotes() {}, renderNoteTarget() {}, renderPresence() {},
+      renderVote() {}, updateModDisplay() {}, renderModList() {}, renderSpeakers() {}, renderRP() {},
+    };
+    runInNewContext(`${current}\n${tabs}\n${apply}`, ctx);
+    return ctx;
+  }
+  const first = client(), second = client();
+  runInNewContext("switchTab('notes')", first);
+  runInNewContext("switchTab('vote')", second);
+  assert.equal(first.saves + second.saves, 0);
+  assert.equal(first.S.activeTab, 'gsl');
+  assert.equal(second.S.activeTab, 'gsl');
+  first.S.notes.push({ id: 'shared', text: 'Nota compartilhada' });
+  second.remote = structuredClone(first.S);
+  runInNewContext('applyRemoteState(remote)', second);
+  assert.equal(runInNewContext('currentTab()', first), 'notes');
+  assert.equal(runInNewContext('currentTab()', second), 'vote');
+  assert.equal(second.S.notes[0].text, 'Nota compartilhada');
+  assert.equal(second.S.speechMode, 'gsl');
+  second.remote = { ...second.remote, config: { independentTabs: false }, activeTab: 'presence' };
+  runInNewContext('applyRemoteState(remote)', second);
+  assert.equal(runInNewContext('currentTab()', second), 'presence');
+  runInNewContext("switchTab('notes')", second);
+  assert.equal(second.S.activeTab, 'notes');
+  assert.equal(second.saves, 1);
 });
 
 test('connected saves never activate the local recovery warning or outbox', t => {

@@ -66,6 +66,8 @@ function makeDefaultState(){return{
 
 let S=makeDefaultState();
 let activeRoomId=null;
+let localActiveTab=null;
+function currentTab(){return activeRoomId&&S.config.independentTabs===true?(localActiveTab||S.activeTab):S.activeTab;}
 let applyingRemoteState=false;
 let readOnly=false;
 function setReadOnly(value){
@@ -472,7 +474,7 @@ function initApp(){
   updateModDisplay();
   updateUnmodDisplay();
   initSolo();
-  switchTab(S.activeTab||'gsl');
+  switchTab(currentTab()||'gsl');
 }
 
 /* ══════════════════════════════════════════════════════
@@ -488,7 +490,9 @@ function switchTab(name){
   document.getElementById('rp-header').textContent=name==='mod'?'Acrescentar Orador (Mod.)':'Acrescentar Orador';
   const statusMap={gsl:'Lista de Discursos',motions:'Moções',mod:'Sessão Moderada',unmod:'Sessão Não-Moderada',solo:'Orador Único',vote:'Votação',presence:'Presença',notes:'Notas'};
   document.getElementById('status-pill').textContent=statusMap[name]||name;
-  if(!readOnly){
+  if(activeRoomId&&S.config.independentTabs===true){
+    localActiveTab=name;
+  }else if(!readOnly&&!applyingRemoteState){
     S.activeTab=name;
     if(['gsl','mod','solo'].includes(name))S.speechMode=name;
     save();
@@ -647,6 +651,8 @@ function openCfg(){
   document.getElementById('c-session').value=S.config.session;
   document.getElementById('c-time').value=S.config.defaultTime;
   document.getElementById('c-warn').value=S.config.warnTime;
+  document.getElementById('cfg-independent-tabs').hidden=!activeRoomId;
+  document.getElementById('c-independent-tabs').checked=S.config.independentTabs===true;
   const viewerSec = document.getElementById('cfg-viewer-sec');
   if(viewerSec) viewerSec.style.display = activeRoomId ? '' : 'none';
   openPanel('cfg-panel');
@@ -663,6 +669,12 @@ function saveConfig(){
   S.config.session=document.getElementById('c-session').value.trim();
   S.config.defaultTime=parseInt(document.getElementById('c-time').value)||60;
   S.config.warnTime=parseInt(document.getElementById('c-warn').value)||15;
+  if(activeRoomId){
+    const independent=document.getElementById('c-independent-tabs').checked;
+    if(independent&&!S.config.independentTabs)localActiveTab=S.activeTab;
+    if(!independent&&S.config.independentTabs){S.activeTab=localActiveTab||S.activeTab;localActiveTab=null;}
+    S.config.independentTabs=independent;
+  }
   S.timer.total=S.config.defaultTime;S.timer.sec=S.config.defaultTime;
   document.getElementById('tb-committee').textContent=S.config.committee;
   document.getElementById('tb-session').textContent=S.config.session;
@@ -815,7 +827,7 @@ function clearHistory(){logEvent('speech_history.cleared',{count:S.history.lengt
    ══════════════════════════════════════════════════════ */
 function addSpeaker(code){
   const cc=rosterFind(code);if(!cc)return;
-  const target=S.activeTab==='mod'?'mod':'gsl';
+  const target=currentTab()==='mod'?'mod':'gsl';
   logEvent('speaker.queued',{mode:target,participant:code});
   if(target==='mod'){S.mod.spks.push({c:cc.c,f:cc.f});renderModList();}
   else{S.speakers.push({c:cc.c,f:cc.f});renderSpeakers();}
@@ -900,7 +912,7 @@ function renderRP(){
   const q=(document.getElementById('rp-search')?.value||'').toLowerCase();
   const inGsl=new Set(S.speakers.map(s=>s.c));
   const inMod=new Set(S.mod.spks.map(s=>s.c));
-  const inList=S.activeTab==='mod'?inMod:inGsl;
+  const inList=currentTab()==='mod'?inMod:inGsl;
   const list=S.committeeCountries.filter(c=>dispName(c.c).toLowerCase().includes(q));
   const el=document.getElementById('rp-list');if(!el)return;
   el.innerHTML=list.map(c=>{
@@ -1516,8 +1528,8 @@ document.addEventListener('keydown',e=>{
   if(readOnly)return;
   const tag=document.activeElement?.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
-  if(e.key===' '){e.preventDefault();if(S.activeTab==='gsl')gslPP();else if(S.activeTab==='mod')modPP();else if(S.activeTab==='unmod')unmodPP();}
-  if(e.key==='n'||e.key==='N'){if(S.activeTab==='gsl')gslNext();}
+  if(e.key===' '){e.preventDefault();if(currentTab()==='gsl')gslPP();else if(currentTab()==='mod')modPP();else if(currentTab()==='unmod')unmodPP();}
+  if(e.key==='n'||e.key==='N'){if(currentTab()==='gsl')gslNext();}
   if(e.key==='Escape'){['cfg-panel','vote-panel','caucus-panel'].forEach(id=>closePanel(id));}
 });
 
@@ -1562,6 +1574,7 @@ function showCurrentState(){
 
 function setRoomContext(roomId){
   if(editingNote)cancelNoteEdit();
+  if(activeRoomId!==(roomId||null))localActiveTab=null;
   activeRoomId=roomId||null;
   setReadOnly(false);
 }
@@ -1584,9 +1597,12 @@ function startFreshRoom(committeeKey){
 
 function applyRemoteState(snapshot){
   if(!snapshot)return;
+  const previousTab=currentTab();
   stopAll();
   applyingRemoteState=true;
   hydrateState(snapshot);
+  if(activeRoomId&&S.config.independentTabs===true)localActiveTab=localActiveTab||previousTab||S.activeTab;
+  else localActiveTab=null;
   if(!activeRoomId)try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
   showCurrentState();
   applyingRemoteState=false;

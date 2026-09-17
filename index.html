@@ -157,6 +157,10 @@
       <div class="ip-field"><label>Tempo padrão (seg)</label><input class="ip-inp" type="number" id="c-time" min="10" max="600"></div>
       <div class="ip-field"><label>Aviso (seg)</label><input class="ip-inp" type="number" id="c-warn" min="5" max="120"></div>
     </div>
+    <div id="cfg-independent-tabs" style="margin:.75rem 0" hidden>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="c-independent-tabs">Abas não sincronizadas</label>
+      <p style="font-size:12px;color:var(--muted);margin:.375rem 0">Cada usuário escolhe sua própria aba. Notas, votos e os demais dados continuam compartilhados.</p>
+    </div>
     <div style="display:flex;gap:8px;margin-top:.375rem">
       <button class="btn-primary" onclick="saveConfig()">Salvar</button>
       <button class="btn-secondary" onclick="closePanel('cfg-panel')">Cancelar</button>

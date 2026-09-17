@@ -95,3 +95,7 @@ O botão **Pedir ajuda** fica disponível na página inicial e nas salas para us
 O backend valida a estrutura básica do estado recebido e limita seu tamanho a 2 MB em UTF-8 antes de gravar. Quadros WebSocket maiores que o limite encerram somente a conexão responsável. Após logout ou expiração da autenticação, o socket não pode enviar novas alterações.
 
 O app encerra a sala com `POST /api/rooms/:id/close` e corpo `{}`, depois da confirmação dos envios. Integrações que incluam `state` nesse endpoint também devem enviar `baseVersion` correspondente à versão atual; versões antigas retornam 409 sem sobrescrever a sessão. Quando uma confirmação demora, o cliente consulta o estado pelo próprio WebSocket, sem fechar uma conexão aberta nem gravar localmente.
+
+## Abas não sincronizadas
+
+Dentro de uma sala, abra **Config**, marque **Abas não sincronizadas** e salve. A opção vale para a sala: cada usuário navega em sua própria aba, enquanto notas, votos e os demais dados continuam compartilhados. A escolha da aba fica apenas na memória de cada navegador e não gera envio pelo WebSocket. Ao desativar a opção, a aba escolhida por quem salvou volta a ser compartilhada com os participantes.
