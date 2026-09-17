@@ -6,19 +6,30 @@ export class SessionSync {
     this.baseState = null; this.pendingState = null; this.inFlightState = null;
     this.sending = false; this.ready = false; this.conflict = null;
     this.status = 'disconnected'; this.listeners = new Set(); this.retryCount = 0;
+    this.offlineMode = false; this.persisted = false;
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit(event) { for (const listener of this.listeners) listener(event); }
   setStatus(status) { this.status = status; this.emit({ type: 'status', status }); }
   get dirty() { return Boolean(this.pendingState || this.inFlightState); }
   get localState() { return this.pendingState || this.inFlightState; }
+  get showLocalWarning() { return this.dirty && (this.offlineMode || Boolean(this.conflict) || ['closed', 'error'].includes(this.status)); }
+  startOfflineGrace() {
+    if (this.offlineMode || this.offlineTimer != null || this.options?.mode === 'viewer') return;
+    this.offlineTimer = setTimeout(() => {
+      this.offlineTimer = null;
+      if (!this.room || this.ready) return;
+      this.offlineMode = true; this.persist(); this.emit({ type: 'offline' });
+    }, 5000);
+  }
   storageKey() { return `simsd-outbox-v1:${this.options?.userId || 'local'}:${this.room?.id}`; }
-  persist() {
+  persist(force = true) {
     if (!this.room || this.options.mode === 'viewer') return true;
+    if (!force && this.dirty && !this.offlineMode && !this.persisted && !this.conflict && this.room.status !== 'closed') return true;
     try {
       if (this.dirty) localStorage.setItem(this.storageKey(), JSON.stringify({ schema: 1, baseState: this.baseState, state: this.localState, version: this.version }));
-      else localStorage.removeItem(this.storageKey());
-      this.persisted = true;
+      else { localStorage.removeItem(this.storageKey()); if (this.ready) this.offlineMode = false; }
+      this.persisted = this.dirty;
       return true;
     } catch {
       this.persisted = false;
@@ -33,7 +44,7 @@ export class SessionSync {
       try {
         const saved = JSON.parse(localStorage.getItem(this.storageKey()) || 'null');
         if (saved?.schema === 1 && saved.state && typeof saved.state === 'object') {
-          this.baseState = saved.baseState; this.pendingState = saved.state; this.version = saved.version || 0; this.persisted = true;
+          this.baseState = saved.baseState; this.pendingState = saved.state; this.version = saved.version || 0; this.persisted = true; this.offlineMode = true;
           window.SimSDController?.applyRemoteState(saved.state);
         }
       } catch { this.emit({ type: 'error', message: 'Não foi possível ler a fila local de alterações.' }); }
@@ -41,6 +52,8 @@ export class SessionSync {
     window.SimSDController?.setReadOnly?.(room.status === 'closed' || !this.dirty || options.mode === 'viewer');
     this.onlineHandler = () => { if (!this.ready) this.connect(); };
     window.addEventListener?.('online', this.onlineHandler);
+    this.pageHideHandler = () => { if (this.dirty) this.persist(); };
+    window.addEventListener?.('pagehide', this.pageHideHandler);
     this.connect();
   }
   connect() {
@@ -48,6 +61,7 @@ export class SessionSync {
     clearTimeout(this.retryTimer); clearTimeout(this.connectionTimer);
     const old = this.socket; this.socket = null; old?.close();
     this.ready = false; this.setStatus('connecting');
+    this.startOfflineGrace();
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let url = `${protocol}//${location.host}/ws?roomId=${encodeURIComponent(this.room.id)}`;
     if (this.options.mode) url += `&mode=${encodeURIComponent(this.options.mode)}`;
@@ -71,13 +85,14 @@ export class SessionSync {
     clearTimeout(this.connectionTimer); clearTimeout(this.ackTimer);
     this.pendingState = this.localState; this.inFlightState = null;
     this.sending = false; this.requestId = null; this.ready = false;
-    this.persist(); this.setStatus('disconnected');
+    this.startOfflineGrace(); this.persist(false); this.setStatus('disconnected');
     clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => this.connect(), Math.min(15000, 1000 * 2 ** Math.min(this.retryCount++, 4)));
   }
   receive(message) {
     if (message.type === 'state:init') {
       clearTimeout(this.connectionTimer); this.ready = true; this.retryCount = 0;
+      clearTimeout(this.offlineTimer); this.offlineTimer = null;
       this.room.status = message.room.status;
       if (this.room.status === 'closed') return this.closed(message);
       window.SimSDController?.setReadOnly?.(this.options.mode === 'viewer');
@@ -98,7 +113,7 @@ export class SessionSync {
       clearTimeout(this.ackTimer);
       this.baseState = this.inFlightState; this.version = message.version;
       this.inFlightState = null; this.sending = false; this.requestId = null;
-      this.persist(); this.sendPending();
+      this.persist(false); this.sendPending();
       if (!this.dirty) { this.setStatus('connected'); this.emit({ type: 'saved' }); }
     } else if (message.type === 'room:closed') this.closed(message);
     else if (message.type === 'room:reopened') {
@@ -130,7 +145,7 @@ export class SessionSync {
       this.pendingState = sameState(merged.state, remote) ? null : merged.state;
     }
     this.conflict = null; this.baseState = copyState(remote); this.version = version || 0;
-    this.persist(); window.SimSDController?.applyRemoteState(this.pendingState || remote);
+    this.persist(false); window.SimSDController?.applyRemoteState(this.pendingState || remote);
     this.sendPending();
     if (!this.dirty) { this.setStatus('connected'); this.emit({ type: 'saved' }); }
   }
@@ -155,7 +170,7 @@ export class SessionSync {
   }
   pushState(state, immediate = false) {
     if (!state || !this.room || this.room.status === 'closed' || this.options.mode === 'viewer') return;
-    clearTimeout(this.pushTimer); this.pendingState = copyState(state); this.persist();
+    clearTimeout(this.pushTimer); this.pendingState = copyState(state); this.persist(false);
     this.setStatus(this.conflict ? 'conflict' : this.ready ? 'syncing' : 'disconnected');
     if (immediate) this.sendPending();
     else this.pushTimer = setTimeout(() => this.sendPending(), 120);
@@ -164,7 +179,7 @@ export class SessionSync {
     if (!this.pendingState || this.sending || this.conflict || !this.ready || this.room?.status !== 'open' || this.socket?.readyState !== WebSocket.OPEN) return;
     clearTimeout(this.pushTimer);
     this.inFlightState = this.pendingState; this.pendingState = null; this.sending = true;
-    this.requestId = crypto.randomUUID(); this.setStatus('syncing'); this.persist();
+    this.requestId = crypto.randomUUID(); this.setStatus('syncing'); this.persist(false);
     try {
       this.socket.send(JSON.stringify({ type: 'state:update', state: this.inFlightState, baseVersion: this.version, requestId: this.requestId }));
       this.ackTimer = setTimeout(() => this.disconnected(), 10000);
@@ -206,7 +221,9 @@ export class SessionSync {
   close() {
     if (this.room && this.dirty) this.persist();
     window.removeEventListener?.('online', this.onlineHandler);
-    for (const timer of [this.pushTimer, this.retryTimer, this.connectionTimer, this.ackTimer]) clearTimeout(timer);
+    window.removeEventListener?.('pagehide', this.pageHideHandler);
+    for (const timer of [this.pushTimer, this.retryTimer, this.connectionTimer, this.ackTimer, this.offlineTimer]) clearTimeout(timer);
+    this.offlineTimer = null; this.offlineMode = false; this.persisted = false;
     const socket = this.socket; this.socket = null; socket?.close();
     this.room = null; this.pendingState = null; this.inFlightState = null; this.baseState = null;
     this.conflict = null; this.sending = false; this.ready = false; this.version = 0; this.requestId = null;
