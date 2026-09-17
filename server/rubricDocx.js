@@ -1,6 +1,6 @@
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, AlignmentType, WidthType, VerticalAlign, TableLayoutType, BorderStyle } from 'docx';
 import { EVALUATION_CRITERIA } from './evaluationCriteria.js';
-import { DPO_QUESTION_IDS, DPO_QUESTIONS, GENERAL_RUBRIC_KEYS, rubricLabel, scoreConcept, scoreStars } from '../src/rubricConfig.js';
+import { DPO_QUESTION_IDS, DPO_QUESTIONS, GENERAL_RUBRIC_KEYS, rubricLabel, scoreConcept, scoreStars } from '../rubricConfig.js';
 
 const width = 9026;
 const border = { style: BorderStyle.SINGLE, size: 4, color: 'B7B7B7' };

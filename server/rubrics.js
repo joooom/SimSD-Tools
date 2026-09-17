@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { COMMITTEE_NAMES, EVALUATION_CRITERIA, committeeDelegations } from './evaluationCriteria.js';
-import { DPO_QUESTION_IDS, GENERAL_RUBRIC_KEYS, PRIORITY_LABELS, rubricKey, scoreConcept, scoreLevel } from '../src/rubricConfig.js';
+import { DPO_QUESTION_IDS, GENERAL_RUBRIC_KEYS, PRIORITY_LABELS, rubricKey, scoreConcept, scoreLevel } from '../rubricConfig.js';
 
 const invalid = message => Object.assign(new Error(message), { status: 400 });
 export function rubricOptions(body, sessions) {
