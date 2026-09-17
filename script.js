@@ -503,6 +503,8 @@ function switchTab(name){
   if(name==='mod'){updateModDisplay();renderModList();}
   if(name==='gsl'){renderSpeakers();}
   renderRP();
+  if(!applyingRemoteState)window.SimSDSync?.publishProjectorTab();
+  window.SimSDNavigation?.tabChanged(name,applyingRemoteState);
 }
 
 let editingNote = null;
@@ -646,6 +648,7 @@ function saveInline(field){
    CONFIG PANEL
    ══════════════════════════════════════════════════════ */
 function openCfg(){
+  updateProjector();
   document.getElementById('c-conf').value=S.config.conference;
   document.getElementById('c-committee').value=S.config.committee;
   document.getElementById('c-session').value=S.config.session;
@@ -660,22 +663,44 @@ function openCfg(){
 function openViewerMode(){
   if(activeRoomId) window.open('/viewer?roomId=' + encodeURIComponent(activeRoomId), '_blank');
 }
+function updateProjector(){
+  const sync=window.SimSDSync;
+  const panel=document.getElementById('cfg-projector-control');
+  if(!panel)return;
+  panel.hidden=!activeRoomId;
+  const mine=Boolean(sync?.clientId&&sync.projector?.clientId===sync.clientId);
+  document.getElementById('projector-follow-button').textContent=mine?'Parar de seguir este cliente':'Projetor seguir este cliente';
+  document.getElementById('projector-follow-status').textContent=mine?'O projetor está seguindo as abas deste cliente.':sync?.projector?`Projetor seguindo: ${sync.projector.name}`:'Projetor seguindo a aba compartilhada da sala.';
+}
+function followProjector(){
+  const sync=window.SimSDSync;
+  try{sync?.selectProjector(!(sync.clientId&&sync.projector?.clientId===sync.clientId));}
+  catch(error){alert(error.message);}
+}
 function saveConfig(){
-  finishActivity('gsl',S.timer.sec,'reconfigured');
-  clearInterval(S.timer.iv);S.timer.running=false;
-  document.getElementById('btn-gsl-pp').textContent='play_arrow';
+  const defaultTime=Number(document.getElementById('c-time').value);
+  const warnTime=Number(document.getElementById('c-warn').value);
+  if(!Number.isInteger(defaultTime)||defaultTime<10||defaultTime>600||!Number.isInteger(warnTime)||warnTime<5||warnTime>120){
+    alert('Use um tempo inteiro entre 10 e 600 segundos e um aviso entre 5 e 120 segundos.');
+    return;
+  }
+  if(defaultTime!==S.config.defaultTime){
+    finishActivity('gsl',S.timer.sec,'reconfigured');
+    clearInterval(S.timer.iv);S.timer.running=false;
+    document.getElementById('btn-gsl-pp').textContent='play_arrow';
+    S.timer.total=defaultTime;S.timer.sec=defaultTime;
+  }
   S.config.conference=document.getElementById('c-conf').value.trim()||'Sim SD';
   S.config.committee=document.getElementById('c-committee').value.trim();
   S.config.session=document.getElementById('c-session').value.trim();
-  S.config.defaultTime=parseInt(document.getElementById('c-time').value)||60;
-  S.config.warnTime=parseInt(document.getElementById('c-warn').value)||15;
+  S.config.defaultTime=defaultTime;
+  S.config.warnTime=warnTime;
   if(activeRoomId){
     const independent=document.getElementById('c-independent-tabs').checked;
     if(independent&&!S.config.independentTabs)localActiveTab=S.activeTab;
     if(!independent&&S.config.independentTabs){S.activeTab=localActiveTab||S.activeTab;localActiveTab=null;}
     S.config.independentTabs=independent;
   }
-  S.timer.total=S.config.defaultTime;S.timer.sec=S.config.defaultTime;
   document.getElementById('tb-committee').textContent=S.config.committee;
   document.getElementById('tb-session').textContent=S.config.session;
   logEvent('session.configured',{config:S.config});
@@ -1606,6 +1631,7 @@ function applyRemoteState(snapshot){
   if(!activeRoomId)try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
   showCurrentState();
   applyingRemoteState=false;
+  window.SimSDSync?.publishProjectorTab();
 }
 
 function reportHTMLForState(snapshot,options={}){
@@ -1622,6 +1648,8 @@ function reportHTMLForState(snapshot,options={}){
 }
 
 window.SimSDController={
+  projection:()=>({tab:currentTab()||'gsl',speechMode:S.speechMode||'gsl'}),
+  updateProjector,
   snapshot:sessionSnapshot,
   setReadOnly,
   setRoomContext,
@@ -1631,6 +1659,7 @@ window.SimSDController={
 };
 
 const chairActions={
+  followProjector,
   chooseCommittee,backToCommittee,renderCountryGrid,filterRegion,toggleSetup,
   selectVisible,deselectAll,selectCSNU,selectALL193,startSession,goSetup,
   encerrarSessao,resetSession,switchTab,inlineEdit,saveInline,openCfg,saveConfig,openViewerMode,

@@ -28,6 +28,89 @@ function init(state = {}, version = 0, status = 'open') {
   sessionSync.socket.receive({ type: 'state:init', state, version, room: { status } });
 }
 
+test('room metadata reaches viewers without attaching socket listeners', () => {
+  const events = [];
+  const unsubscribe = sessionSync.subscribe(event => { if (event.type === 'room') events.push(event.room); });
+  try {
+    sessionSync.open({ id: 'room' }, { mode: 'viewer' });
+    sessionSync.socket.receive({ type: 'state:init', state: null, version: 0, room: { id: 'room', name: 'Sala nova', status: 'open' } });
+    assert.equal(events[0].name, 'Sala nova');
+    assert.equal(sessionSync.status, 'connected');
+  } finally { unsubscribe(); }
+});
+
+test('deleted rooms stop retrying and keep pending data available for download', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  sessionSync.pushState({ notes: [{ id: 'pending' }] });
+  sessionSync.socket.receive({ type: 'room:deleted' });
+  sessionSync.socket.drop();
+  t.mock.timers.tick(60000);
+  assert.equal(sessionSync.socket, null);
+  assert.equal(sessionSync.status, 'deleted');
+  assert.equal(sessionSync.showRecoveryActions, true);
+  assert.equal(sessionSync.localState.notes[0].id, 'pending');
+});
+
+test('explicit discard clears only this room recovery data and sends nothing', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
+  sessionSync.socket.drop(); sessionSync.pushState({ notes: [{ id: 'pending' }] });
+  t.mock.timers.tick(5000);
+  storage.set('other-room', 'keep');
+  sessionSync.discardPending();
+  assert.equal(sessionSync.dirty, false);
+  assert.equal(storage.size, 1);
+  assert.equal(storage.get('other-room'), 'keep');
+});
+
+test('configuration changes preserve the running timer unless its duration changes', () => {
+  const source = readFileSync(new URL('../script.js', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('function saveConfig(){'), source.indexOf('function openPanel('));
+  const fields = Object.fromEntries(Object.entries({ 'c-conf': 'SimSD', 'c-committee': 'UNODC', 'c-session': '1', 'c-time': '60', 'c-warn': '15' }).map(([key, value]) => [key, { value }]));
+  fields['c-independent-tabs'] = { checked: true };
+  let finished = 0, saved = 0, alerts = 0;
+  const ctx = {
+    S: { config: { defaultTime: 60 }, activeTab: 'gsl', timer: { total: 60, sec: 37, running: true, iv: 123 } },
+    activeRoomId: 'room', localActiveTab: null,
+    document: { getElementById: id => fields[id] || (fields[id] = {}) },
+    finishActivity() { finished++; }, clearInterval() {}, logEvent() {}, closePanel() {}, updateGslTimer() {},
+    save() { saved++; }, alert() { alerts++; },
+  };
+  runInNewContext(`${fn}\nsaveConfig();`, ctx);
+  assert.equal(ctx.S.timer.sec, 37);
+  assert.equal(ctx.S.timer.running, true);
+  assert.equal(finished, 0);
+  assert.equal(ctx.S.config.independentTabs, true);
+  fields['c-time'].value = '-10';
+  runInNewContext('saveConfig()', ctx);
+  assert.equal(alerts, 1); assert.equal(saved, 1); assert.equal(ctx.S.timer.sec, 37);
+  fields['c-time'].value = '90';
+  runInNewContext('saveConfig()', ctx);
+  assert.equal(ctx.S.timer.sec, 90); assert.equal(ctx.S.timer.running, false); assert.equal(finished, 1);
+});
+
+test('selected client sends projector tabs on its existing socket without saving session state', t => {
+  window.SimSDController.projection = () => ({ tab: 'vote', speechMode: 'gsl' });
+  try {
+    sessionSync.open({ id: 'room', status: 'open' });
+    sessionSync.socket.receive({ type: 'state:init', state: {}, version: 0, room: { status: 'open' }, clientId: 'this-client', projector: null });
+    const socket = sessionSync.socket;
+    sessionSync.selectProjector(true);
+    assert.equal(socket.messages.at(-1).type, 'projector:select');
+    socket.receive({ type: 'projector:state', projector: { clientId: 'this-client', tab: 'gsl', speechMode: 'gsl' } });
+    sessionSync.publishProjectorTab();
+    assert.equal(socket.messages.at(-1).type, 'projector:tab');
+    assert.equal(socket.messages.at(-1).tab, 'vote');
+    assert.equal(sessionSync.dirty, false);
+    assert.equal(storage.size, 0);
+    socket.receive({ type: 'projector:state', projector: { clientId: 'other', tab: 'gsl' } });
+    const count = socket.messages.length;
+    sessionSync.publishProjectorTab();
+    assert.equal(socket.messages.length, count);
+  } finally { delete window.SimSDController.projection; }
+});
+
 test('repeated online actions use one socket immediately with no storage writes or status changes', t => {
   sessionSync.open({ id: 'room', status: 'open' }); init({ notes: [] });
   const socket = sessionSync.socket;
@@ -60,7 +143,7 @@ test('legacy chair save and remote state application never write session data lo
     currentTab: () => 'gsl', S: { config: {} }, localActiveTab: null,
     sessionSnapshot: () => ({ notes: [] }), stateStorageKey: () => 'session',
     localStorage: { setItem: () => { writes++; } },
-    window: { SimSDSync: { pushState: () => { sends++; } } },
+    window: { SimSDSync: { pushState: () => { sends++; }, publishProjectorTab() {} } },
     stopAll() {}, hydrateState() {}, showCurrentState() {},
   };
   runInNewContext(`${save}\n${apply}\nsave(); applyRemoteState({notes: []});`, context);
@@ -80,6 +163,7 @@ test('independent tabs stay local across shared edits and resume synchronization
     const ctx = {
       S: { config: { independentTabs: true }, activeTab: 'gsl', speechMode: 'gsl', notes: [] },
       activeRoomId: 'room', localActiveTab: null, readOnly: false, applyingRemoteState: false,
+      window: {},
       saves: 0, save() { ctx.saves++; },
       document: {
         querySelectorAll: () => [],

@@ -161,6 +161,10 @@
       <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="c-independent-tabs">Abas não sincronizadas</label>
       <p style="font-size:12px;color:var(--muted);margin:.375rem 0">Cada usuário escolhe sua própria aba. Notas, votos e os demais dados continuam compartilhados.</p>
     </div>
+    <div id="cfg-projector-control" style="margin:.75rem 0" hidden>
+      <button class="btn-secondary" id="projector-follow-button" onclick="followProjector()">Projetor seguir este cliente</button>
+      <p id="projector-follow-status" role="status" style="font-size:12px;color:var(--muted);margin:.375rem 0"></p>
+    </div>
     <div style="display:flex;gap:8px;margin-top:.375rem">
       <button class="btn-primary" onclick="saveConfig()">Salvar</button>
       <button class="btn-secondary" onclick="closePanel('cfg-panel')">Cancelar</button>

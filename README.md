@@ -16,7 +16,7 @@ npm start
 
 Copie `.env.example` para `.env` ou configure as variáveis no ambiente do processo. Cadastre no Portal SimSD exatamente a mesma URL definida em `SIMSD_OAUTH_REDIRECT_URI`, terminando em `/auth/callback`. Em produção, mantenha `SIMSD_DEV_AUTH=0`, use HTTPS e deixe `SIMSD_COOKIE_SECURE=1`.
 
-O backend implementa Authorization Code com PKCE S256. O access token do portal nunca é enviado ao navegador e não é persistido; a aplicação cria uma sessão própria, `HttpOnly`, com duração máxima de uma hora.
+O backend implementa Authorization Code com PKCE S256. O access token do portal nunca é enviado ao navegador e não é persistido; a aplicação cria uma sessão própria, `HttpOnly`, com duração de **24 horas**, independente da expiração desse token. `SIMSD_SESSION_HOURS` permite configurar de 24 a 720 horas; valores inválidos usam 24 horas. Cookie e banco usam a mesma duração fixa, contada desde o login, inclusive para WebSockets. Após atualizar esta configuração, faça login novamente para emitir a sessão e o cookie com o novo prazo. Logout continua invalidando o acesso imediatamente. Preserve o volume do SQLite entre deploys para manter as sessões existentes.
 
 ## Permissões
 
@@ -99,3 +99,11 @@ O app encerra a sala com `POST /api/rooms/:id/close` e corpo `{}`, depois da con
 ## Abas não sincronizadas
 
 Dentro de uma sala, abra **Config**, marque **Abas não sincronizadas** e salve. A opção vale para a sala: cada usuário navega em sua própria aba, enquanto notas, votos e os demais dados continuam compartilhados. A escolha da aba fica apenas na memória de cada navegador e não gera envio pelo WebSocket. Ao desativar a opção, a aba escolhida por quem salvou volta a ser compartilhada com os participantes.
+
+Em **Config → Projetor seguir este cliente**, o projetor acompanha as abas deste navegador, inclusive com abas não sincronizadas. A ação é imediata e não exige clicar em Salvar. O mesmo botão permite parar; outro cliente pode assumir o controle. Ao desconectar o cliente selecionado, a projeção retorna à aba compartilhada. A aba de notas permanece privada e mostra o modo de discurso na projeção. A seleção usa o WebSocket existente e não grava estado local nem altera a versão da sessão.
+
+## Importar alterações pendentes
+
+No painel administrativo, use **Importar alterações pendentes** e selecione o JSON baixado por **Baixar cópia local**. Confira a sala, as quantidades e os conflitos na prévia, escolha quais valores preservar nos conflitos e clique em **Aplicar alterações na sala**. A operação exige admin e combina os dados com a sala original; não redireciona arquivos de salas excluídas para outra sala. Reabra sessões encerradas antes de importar. Se a sala mudar após a prévia, clique em **Analisar novamente**. A importação registra um acontecimento e atualiza os clientes conectados pelo WebSocket.
+
+A navegação usa URLs com fragmentos (por exemplo, #/notas, #/admin/pendencias e #/sala/ID/notes). Voltar/Avançar restauram a tela e a aba da sala. Ao atualizar, salas com abas sincronizadas seguem a aba atual compartilhada; salas com abas independentes e salas encerradas restauram a aba da URL, sem deslocar os demais usuários. A troca de abas mantém o mesmo WebSocket; sair pelo histórico usa a mesma proteção de alterações pendentes do botão de saída. Links continuam sujeitos ao login e às permissões da sala.

@@ -149,6 +149,34 @@ assert.equal((await second.inbox.next('state:init')).state, null);
 assert.equal((await first.inbox.next('presence')).count >= 1, true);
 assert.equal((await first.inbox.next('presence')).count, 2);
 
+// Projector navigation follows one connection without changing shared state.
+const projectorViewer = await connect(`${room.id}&mode=viewer`, owner.cookie);
+assert.equal((await projectorViewer.inbox.next('state:init')).projector, null);
+first.socket.send(JSON.stringify({ type: 'projector:select', enabled: true, tab: 'vote', speechMode: 'gsl' }));
+const selectedProjector = (await projectorViewer.inbox.next('projector:state')).projector;
+assert.equal(selectedProjector.tab, 'vote');
+assert.equal(selectedProjector.name, owner.user.name);
+second.socket.send(JSON.stringify({ type: 'projector:tab', tab: 'mod', speechMode: 'mod' }));
+first.socket.send(JSON.stringify({ type: 'projector:tab', tab: 'presence', speechMode: 'gsl' }));
+assert.equal((await projectorViewer.inbox.next('projector:state')).projector.tab, 'presence');
+const lateViewer = await connect(`${room.id}&mode=viewer`, owner.cookie);
+assert.equal((await lateViewer.inbox.next('state:init')).projector.tab, 'presence');
+lateViewer.socket.close();
+projectorViewer.socket.send(JSON.stringify({ type: 'projector:select', enabled: true, tab: 'mod', speechMode: 'mod' }));
+assert.match((await projectorViewer.inbox.next('error')).message, /espectador/);
+second.socket.send(JSON.stringify({ type: 'projector:select', enabled: true, tab: 'solo', speechMode: 'solo' }));
+assert.equal((await projectorViewer.inbox.next('projector:state')).projector.name, invited.user.name);
+second.socket.send(JSON.stringify({ type: 'projector:select', enabled: false }));
+assert.equal((await projectorViewer.inbox.next('projector:state')).projector, null);
+const temporaryPresenter = await connect(room.id, owner.cookie);
+await temporaryPresenter.inbox.next('state:init');
+temporaryPresenter.socket.send(JSON.stringify({ type: 'projector:select', enabled: true, tab: 'notes', speechMode: 'gsl' }));
+assert.equal((await projectorViewer.inbox.next('projector:state')).projector.tab, 'notes');
+temporaryPresenter.socket.close();
+assert.equal((await projectorViewer.inbox.next('projector:state')).projector, null);
+assert.equal((await request(`/api/rooms/${room.id}/state`, { cookie: owner.cookie })).data.version, 0);
+projectorViewer.socket.close();
+
 const state1 = {
   config: { conference: 'SimSD 2026', committee: 'UNESCO', session: 'Sessão integrada' },
   committeeCountries: [{ c: 'Brasil' }, { c: 'França' }],
@@ -406,4 +434,42 @@ try {
 } finally { sync.close(); remoteWriter.socket.close(); }
 await request(`/api/admin/rooms/${offlineRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
 
-console.log('Integration suite passed: auth roles, student restrictions, room ACL, invites, WebSocket sync/conflicts/reconnection, live/final reports, admin deletion.');
+// Administrative recovery uses the original room and refuses stale previews.
+const recoveryRoom = (await request('/api/rooms', { cookie: owner.cookie, method: 'POST', body: { name: 'Importação de pendências', committeeKey: 'unesco' }, expected: 201 })).data.room;
+const recoverySocket = await connect(recoveryRoom.id, owner.cookie);
+await recoverySocket.inbox.next('state:init');
+const recoveryBase = { committeeKey: 'unesco', notes: [{ id: 'n', text: 'Original' }], events: [] };
+recoverySocket.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 0, state: recoveryBase }));
+await recoverySocket.inbox.next('state:ack');
+const backup = { room: recoveryRoom, baseState: recoveryBase, state: { ...recoveryBase, notes: [{ id: 'n', text: 'Arquivo' }, { id: 'offline', text: 'Recuperada' }] } };
+const previewPath = '/api/admin/pending-import/preview';
+const applyPath = '/api/admin/pending-import/apply';
+await request(previewPath, { method: 'POST', body: { backup }, expected: 401 });
+await request(previewPath, { cookie: tools.cookie, method: 'POST', body: { backup }, expected: 403 });
+await request(applyPath, { cookie: tools.cookie, method: 'POST', body: { backup }, expected: 403 });
+await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup: {} }, expected: 400 });
+await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup: { ...backup, state: { notes: null } } }, expected: 400 });
+await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup: { ...backup, state: { ...backup.state, committeeKey: 'oea' } } }, expected: 400 });
+const firstPreview = (await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup } })).data;
+assert.equal(firstPreview.counts.notesAfter, 2);
+assert.equal(firstPreview.conflicts.length, 0);
+assert.equal((await request(`/api/rooms/${recoveryRoom.id}/state`, { cookie: admin.cookie })).data.version, 1);
+recoverySocket.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 1, state: { ...recoveryBase, notes: [{ id: 'n', text: 'Sala' }, { id: 'online', text: 'Atual' }] } }));
+await recoverySocket.inbox.next('state:ack');
+await request(applyPath, { cookie: admin.cookie, method: 'POST', body: { backup, token: firstPreview.token, preference: 'local' }, expected: 409 });
+const reviewed = (await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup } })).data;
+assert.equal(reviewed.conflicts[0].path, 'notes.n.text');
+await request(applyPath, { cookie: admin.cookie, method: 'POST', body: { backup, token: reviewed.token }, expected: 409 });
+await request(applyPath, { cookie: admin.cookie, method: 'POST', body: { backup, token: reviewed.token, preference: 'remote' } });
+const recovered = await recoverySocket.inbox.next('state:update');
+assert.equal(recovered.version, 3);
+assert.equal(recovered.state.notes.find(note => note.id === 'n').text, 'Sala');
+assert.deepEqual(recovered.state.notes.map(note => note.id).sort(), ['n', 'offline', 'online']);
+assert.equal(recovered.state.events.at(-1).type, 'session.pending_imported');
+await request(`/api/rooms/${recoveryRoom.id}/close`, { cookie: admin.cookie, method: 'POST', body: {} });
+await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup }, expected: 409 });
+recoverySocket.socket.close();
+await request(`/api/admin/rooms/${recoveryRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
+await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup }, expected: 404 });
+
+console.log('Integration suite passed: auth roles, room ACL, WebSocket recovery/projector, notes/reports, administrative pending imports.');

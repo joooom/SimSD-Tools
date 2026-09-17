@@ -14,6 +14,7 @@ export class SessionSync {
   get dirty() { return Boolean(this.pendingState || this.inFlightState); }
   get localState() { return this.pendingState || this.inFlightState; }
   get showLocalWarning() { return this.dirty && !this.ready && this.offlineMode; }
+  get showRecoveryActions() { return this.dirty && (this.showLocalWarning || Boolean(this.conflict) || ['closed', 'error', 'deleted'].includes(this.status)); }
   startOfflineGrace() {
     if (this.offlineMode || this.offlineTimer != null || this.options?.mode === 'viewer') return;
     this.offlineTimer = setTimeout(() => {
@@ -60,7 +61,7 @@ export class SessionSync {
     this.connect();
   }
   connect() {
-    if (!this.room) return;
+    if (!this.room || this.room.deleted) return;
     if (this.socket && [0, WebSocket.OPEN].includes(this.socket.readyState)) return;
     clearTimeout(this.retryTimer); clearTimeout(this.connectionTimer);
     const old = this.socket; this.socket = null; old?.close();
@@ -91,21 +92,34 @@ export class SessionSync {
     this.sending = false; this.requestId = null; this.ready = false;
     this.startOfflineGrace(); this.persist(); this.setStatus('disconnected');
     clearTimeout(this.retryTimer);
+    if (this.room.deleted) { this.setStatus('deleted'); return; }
     this.retryTimer = setTimeout(() => this.connect(), Math.min(15000, 1000 * 2 ** Math.min(this.retryCount++, 4)));
   }
   receive(message) {
+    if (message.type === 'projector:state') {
+      this.projector = message.projector;
+      window.SimSDController?.updateProjector?.();
+      this.emit({ type: 'projector', projector: this.projector });
+      return;
+    }
     if (message.type === 'state:init') {
+      this.clientId = message.clientId; this.projector = message.projector || null;
+      window.SimSDController?.updateProjector?.();
+      this.emit({ type: 'projector', projector: this.projector });
       clearTimeout(this.connectionTimer); this.ready = true; this.retryCount = 0;
       clearTimeout(this.offlineTimer); this.offlineTimer = null;
       this.offlineMode = false;
-      this.room.status = message.room.status;
+      this.room = { ...this.room, ...message.room };
+      this.emit({ type: 'room', room: this.room });
       if (this.room.status === 'closed') return this.closed(message);
       window.SimSDController?.setReadOnly?.(this.options.mode === 'viewer');
       if (message.state || this.dirty) this.reconcile(message.state, message.version);
       else {
         this.version = message.version || 0; this.baseState = null;
-        window.SimSDController?.startFreshRoom(this.room.committeeKey);
-        this.pushState(window.SimSDController?.snapshot(), true);
+        if (this.options.mode !== 'viewer') {
+          window.SimSDController?.startFreshRoom?.(this.room.committeeKey);
+          this.pushState(window.SimSDController?.snapshot?.(), true);
+        } else window.SimSDController?.applyRemoteState?.(null);
       }
       if (!this.conflict) this.setStatus('connected');
     } else if (message.type === 'state:snapshot') {
@@ -134,14 +148,16 @@ export class SessionSync {
       this.room.status = 'open'; window.SimSDController?.setReadOnly?.(this.options.mode === 'viewer');
       this.reconcile(message.state, message.version); this.emit({ type: 'reopened' });
     } else if (message.type === 'room:deleted') {
+      this.room.deleted = true;
       this.closed(message);
+      this.setStatus('deleted');
       this.emit({ type: 'error', message: 'A sala foi excluída. As alterações pendentes continuam disponíveis para download neste dispositivo.' });
     } else if (message.type === 'presence') this.emit({ type: 'presence', count: message.count, users: message.users });
     else if (message.type === 'error') {
       if (message.requestId && message.requestId !== this.requestId) return;
       clearTimeout(this.ackTimer);
       this.pendingState = this.localState; this.inFlightState = null; this.sending = false;
-      this.persist(); this.setStatus('error'); this.emit({ type: 'error', message: message.message });
+      this.persist(); this.setStatus('error'); this.emit({ type: 'error', message: message.message, code: message.code });
     }
   }
   reconcile(remote, version) {
@@ -187,6 +203,19 @@ export class SessionSync {
     clearTimeout(this.pushTimer); this.pendingState = copyState(state); this.persist();
     this.setStatus(this.conflict ? 'conflict' : this.ready ? 'connected' : 'disconnected');
     this.sendPending();
+    this.publishProjectorTab();
+  }
+  selectProjector(enabled) {
+    if (!this.ready || this.socket?.readyState !== WebSocket.OPEN) throw new Error('Aguarde a conexão com a sala.');
+    if (this.options.mode === 'viewer' || this.room?.status !== 'open') return;
+    this.socket.send(JSON.stringify({ type: 'projector:select', enabled, ...window.SimSDController?.projection?.() }));
+  }
+  publishProjectorTab() {
+    if (!this.clientId || this.projector?.clientId !== this.clientId || !this.ready || this.socket?.readyState !== WebSocket.OPEN || this.room?.status !== 'open') return;
+    const view = window.SimSDController?.projection?.();
+    if (!view || (view.tab === this.projector.tab && view.speechMode === this.projector.speechMode)) return;
+    try { this.socket.send(JSON.stringify({ type: 'projector:tab', ...view })); }
+    catch { this.disconnected(); }
   }
   sendPending() {
     if (!this.pendingState || this.sending || this.conflict || !this.ready || this.room?.status !== 'open' || this.socket?.readyState !== WebSocket.OPEN) return;
@@ -204,6 +233,7 @@ export class SessionSync {
         catch { return this.disconnected(); }
         this.ackTimer = setTimeout(() => {
           if (this.socket?.readyState !== WebSocket.OPEN) return this.disconnected();
+          this.setStatus('error');
           this.emit({ type: 'error', message: 'O servidor ainda não confirmou as alterações. A conexão permanece aberta; aguardando resposta.' });
         }, 10000);
       }, 10000);
@@ -242,6 +272,12 @@ export class SessionSync {
     const link = document.createElement('a'); link.href = url; link.download = `alteracoes-pendentes-${this.room.id}.json`;
     document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
+  discardPending() {
+    if (this.room && this.persisted) localStorage.removeItem(this.storageKey());
+    clearTimeout(this.ackTimer); clearTimeout(this.pushTimer);
+    this.pendingState = null; this.inFlightState = null; this.conflict = null;
+    this.sending = false; this.requestId = null; this.persisted = false;
+  }
   close() {
     if (this.room && this.dirty) this.persist();
     window.removeEventListener?.('online', this.onlineHandler);
@@ -250,6 +286,7 @@ export class SessionSync {
     this.offlineTimer = null; this.offlineMode = false; this.persisted = false;
     const socket = this.socket; this.socket = null; socket?.close();
     this.room = null; this.pendingState = null; this.inFlightState = null; this.baseState = null;
+    this.clientId = null; this.projector = null;
     this.conflict = null; this.sending = false; this.ready = false; this.version = 0; this.requestId = null;
     window.SimSDController?.setReadOnly?.(false);
   }

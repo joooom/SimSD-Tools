@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionSync } from './sessionSync.js';
 const logoUrl = '/simsd-square.svg';
@@ -7,6 +7,11 @@ import licensesText from './opensource-licenses.md?raw';
 import GeneralNotes from './GeneralNotes.jsx';
 import Rubrics from './Rubrics.jsx';
 import HelpRequest from './HelpRequest.jsx';
+import PendingImport from './PendingImport.jsx';
+import { COMMITTEE_NAMES } from './evaluationCriteria.js';
+import './admin.css';
+import { createNavigation, parseRoute, restoredRoomTab } from './navigation.js';
+let navigation;
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -49,7 +54,7 @@ function LoginScreen({ config, onVisitor }) {
       <div className="auth-actions">
         <button className="visitor-button" onClick={onVisitor}><span className="material-icons">person_outline</span><span><strong>Entrar como visitante</strong><small>100% local neste dispositivo</small></span></button>
         {config.oauthConfigured
-          ? <a className="portal-primary simsd-login" href="/auth/login"><span className="material-icons">login</span>Continuar com SimSD</a>
+          ? <a className="portal-primary simsd-login" onClick={() => { try { sessionStorage.setItem('simsd-return-route', navigation.getSnapshot()); } catch {} }} href="/auth/login"><span className="material-icons">login</span>Continuar com SimSD</a>
           : <button className="portal-primary simsd-login" disabled title="OAuth ainda não configurado"><span className="material-icons">login</span>Continuar com SimSD</button>}
       </div>
       {!config.oauthConfigured && <div className="portal-warning">OAuth ainda não foi configurado no servidor.</div>}
@@ -61,23 +66,31 @@ function LoginScreen({ config, onVisitor }) {
   </div>;
 }
 
-function AdminDashboard({ onClose }) {
+function AdminDashboard({ onClose, section, setSection }) {
   const [rooms, setRooms] = useState([]);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [committeeFilter, setCommitteeFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [pendingRoom, setPendingRoom] = useState(null);
   const [error, setError] = useState('');
   const liveReportTimers = useRef(new Set());
   const reopenRoom = async room => {
+    setPendingRoom(room.id); setError('');
     try { await api(`/api/rooms/${room.id}/reopen`, { method: 'POST' }); await load(); }
     catch (err) { setError(err.message); }
+    finally { setPendingRoom(null); }
   };
-  const load = useCallback(() => api('/api/admin/rooms').then(data => setRooms(data.rooms)).catch(err => setError(err.message)), []);
+  const load = useCallback(() => api('/api/admin/rooms').then(data => setRooms(data.rooms)).catch(err => setError(err.message)).finally(() => setLoading(false)), []);
   const deleteRoom = async (room) => {
     if (!confirm(`Tem certeza que deseja deletar a sala "${room.name}"? Esta ação não pode ser desfeita.`)) return;
+    setPendingRoom(room.id); setError('');
     try {
       await api(`/api/admin/rooms/${room.id}`, { method: 'DELETE' });
       load();
     } catch (err) {
       setError(err.message);
-    }
+    } finally { setPendingRoom(null); }
   };
   useEffect(() => { load(); const timer = setInterval(load, 5000); return () => clearInterval(timer); }, [load]);
   useEffect(() => () => { for (const timer of liveReportTimers.current) clearInterval(timer); }, []);
@@ -157,17 +170,28 @@ function AdminDashboard({ onClose }) {
       update();
     }
   };
+  const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const visibleRooms = rooms.filter(room => (!statusFilter || room.status === statusFilter) && (!committeeFilter || room.committeeKey === committeeFilter) && normalize(`${room.name} ${room.code} ${room.owner.name} ${COMMITTEE_NAMES[room.committeeKey] || ''}`).includes(normalize(search.trim())));
+  const openCount = rooms.filter(room => room.status === 'open').length;
   return <div className="portal-overlay admin-overlay">
     <div className="admin-shell">
-      <div className="admin-head"><div><h1>Painel administrativo</h1><p>Acompanhamento das sessões em tempo real</p></div><button onClick={onClose}>Voltar às salas</button></div>
-      {error && <div className="portal-error">{error}</div>}
-      <div className="admin-room-grid">{rooms.map(room => <article key={room.id}>
-        <div><span className={`room-state ${room.status}`}>{room.status === 'open' ? 'Em andamento' : 'Encerrada'}</span><code>{room.code}</code></div>
-        <h2>{room.name}</h2><p>Responsável: {room.owner.name} · {room.memberCount} participante(s)</p>
-        <button onClick={() => downloadLlmReport(room).catch(err => setError(err.message))}>Relatório avaliativo para LLM</button>
-        {room.status === 'closed' && <button onClick={() => reopenRoom(room)}>Reabrir sala</button>}
-        <div className="room-actions"><button onClick={() => openReport(room, 'partial')}>Relatório parcial</button>{room.status === 'closed' && <button onClick={() => openReport(room, 'final')}>Relatório final</button>}<button onClick={() => deleteRoom(room)} style={{ color: '#d9534f', borderColor: '#d9534f' }}>Deletar</button></div>
-      </article>)}</div>
+      <div className="admin-head"><div><span className="admin-eyebrow">SIMSD · ADMINISTRAÇÃO</span><h1>Painel administrativo</h1><p>Salas, relatórios e recuperação de alterações em um só lugar.</p></div><button onClick={onClose}><span className="material-icons" aria-hidden="true">arrow_back</span>Voltar às salas</button></div>
+      <div className="admin-overview" aria-label="Resumo das salas">{[['', 'Todas as salas', rooms.length, 'meeting_room'], ['open', 'Em andamento', openCount, 'sensors'], ['closed', 'Encerradas', rooms.length - openCount, 'task_alt']].map(([value, label, count, icon]) => <button key={value} className={section === 'rooms' && statusFilter === value ? 'selected' : ''} aria-pressed={section === 'rooms' && statusFilter === value} onClick={() => { setSection('rooms'); setStatusFilter(value); }}><span className="material-icons" aria-hidden="true">{icon}</span><span>{label}<strong>{loading ? '—' : count}</strong></span></button>)}</div>
+      <nav className="admin-nav" aria-label="Áreas administrativas"><button aria-pressed={section === 'rooms'} onClick={() => setSection('rooms')}>Gerenciar salas</button><button aria-pressed={section === 'import'} onClick={() => setSection('import')}><span className="material-icons" aria-hidden="true">upload_file</span>Importar pendências</button></nav>
+      {error && <div className="portal-error" role="alert">{error}<button onClick={() => { setError(''); load(); }}>Tentar novamente</button></div>}
+      <div hidden={section !== 'import'} className="admin-import-area"><PendingImport onImported={load} /></div>
+      <section hidden={section !== 'rooms'} aria-label="Gerenciar salas">
+        <div className="admin-toolbar"><label className="admin-search">Buscar sala<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Nome, código ou responsável" /></label><label>Comitê<select value={committeeFilter} onChange={event => setCommitteeFilter(event.target.value)}><option value="">Todos os comitês</option>{Object.entries(COMMITTEE_NAMES).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label><label>Status<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="">Todos</option><option value="open">Em andamento</option><option value="closed">Encerradas</option></select></label></div>
+        <div className="admin-results"><span>{loading ? 'Carregando salas…' : `${visibleRooms.length} sala(s) encontrada(s)`}</span><span>Atualização automática · 5 s</span></div>
+        {!loading && !visibleRooms.length && <div className="admin-empty"><span className="material-icons" aria-hidden="true">search_off</span><h2>{rooms.length ? 'Nenhuma sala corresponde à busca' : 'Nenhuma sala criada ainda'}</h2><p>{rooms.length ? 'Tente outro nome ou ajuste os filtros.' : 'As salas aparecerão aqui assim que forem criadas.'}</p>{rooms.length > 0 && <button onClick={() => { setSearch(''); setStatusFilter(''); setCommitteeFilter(''); }}>Limpar filtros</button>}</div>}
+        <div className="admin-room-grid">{visibleRooms.map(room => <article key={room.id} aria-label={room.name}>
+          <div className="admin-card-top"><span className={`room-state ${room.status}`}>{room.status === 'open' ? 'Em andamento' : 'Encerrada'}</span><code title="Código da sala">{room.code}</code></div>
+          <span className="admin-committee">{COMMITTEE_NAMES[room.committeeKey] || room.committeeKey}</span><h2>{room.name}</h2>
+          <dl className="admin-card-meta"><div><dt>Responsável</dt><dd>{room.owner.name}</dd></div><div><dt>Participantes</dt><dd>{room.memberCount}</dd></div></dl>
+          <div className="admin-card-actions"><button className="portal-primary" onClick={() => openReport(room, room.status === 'closed' ? 'final' : 'partial')}><span className="material-icons" aria-hidden="true">description</span>{room.status === 'closed' ? 'Abrir relatório final' : 'Abrir relatório ao vivo'}</button><button onClick={() => downloadLlmReport(room).catch(err => setError(err.message))}>Baixar XML para avaliação</button></div>
+          <div className="admin-card-footer">{room.status === 'closed' ? <button disabled={pendingRoom === room.id} onClick={() => reopenRoom(room)}>{pendingRoom === room.id ? 'Aguarde…' : 'Reabrir sala'}</button> : <span className="admin-live-label">Sessão em andamento</span>}<details className="admin-more"><summary>Mais ações</summary><div>{room.status === 'closed' && <button onClick={() => openReport(room, 'partial')}>Relatório parcial</button>}<button className="admin-danger" disabled={pendingRoom === room.id} onClick={() => deleteRoom(room)}>Excluir sala</button></div></details></div>
+        </article>)}</div>
+      </section>
     </div>
   </div>;
 }
@@ -202,13 +226,15 @@ function LicensesModal({ onClose }) {
   </div></div>;
 }
 
-function Lobby({ user, onEnterRoom }) {
-  const [area, setArea] = useState('rooms');
+function Lobby({ user, onEnterRoom, route }) {
+  const area = ['notes', 'rubrics'].includes(route.page) ? route.page : 'rooms';
+  const setArea = area => navigation.navigate({ rooms: '#/salas', notes: '#/notas', rubrics: '#/rubricas' }[area]);
+  const adminOpen = route.page === 'admin' && user.role === 'admin';
+  const setAdminOpen = open => navigation.navigate(open ? '#/admin/salas' : '#/salas');
   const canUseGeneralNotes = ['admin', 'simsd_tools'].includes(user.role);
   const [rooms, setRooms] = useState([]);
   const [name, setName] = useState('');
   const [committeeKey, setCommitteeKey] = useState('unodc');
-  const [adminOpen, setAdminOpen] = useState(false);
   const [membersRoom, setMembersRoom] = useState(null);
   const [licensesOpen, setLicensesOpen] = useState(false);
   const [error, setError] = useState('');
@@ -239,39 +265,41 @@ function Lobby({ user, onEnterRoom }) {
         <button onClick={() => setLicensesOpen(true)} style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: 'inherit', fontSize: '0.9em' }}>Licenças Open Source</button>
       </footer>
     </div>
-    {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
+    {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} section={route.section || 'rooms'} setSection={section => navigation.navigate(section === 'import' ? '#/admin/pendencias' : '#/admin/salas')} />}
     {membersRoom && <MembersModal room={membersRoom} onClose={() => setMembersRoom(null)} />}
     {licensesOpen && <LicensesModal onClose={() => setLicensesOpen(false)} />}
   </div>;
 }
 
 function RoomBar({ room, user, onLeave }) {
+  const [authRequired, setAuthRequired] = useState(false);
   const [status, setStatus] = useState(sessionSync.status);
-  const [pending, setPending] = useState(sessionSync.showLocalWarning);
+  const [pending, setPending] = useState(sessionSync.showRecoveryActions);
   const [conflicts, setConflicts] = useState(sessionSync.conflict?.conflicts || []);
   const [count, setCount] = useState(1);
   const [membersOpen, setMembersOpen] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => sessionSync.subscribe(event => {
-    setPending(sessionSync.showLocalWarning);
+    setPending(sessionSync.showRecoveryActions);
     setConflicts(sessionSync.conflict?.conflicts || []);
     if (event.type === 'status') {
       setStatus(event.status);
-      if (event.status === 'connected') setMessage('Conectado ao vivo.');
+      if (event.status === 'connected') { setMessage('Conectado ao vivo.'); setAuthRequired(false); }
       if (event.status === 'disconnected') { setCount(0); setMessage('Reconectando à sala…'); }
       if (event.status === 'connecting') setMessage('Conectando à sala…');
     }
     if (event.type === 'presence') setCount(event.count);
     if (event.type === 'saved' && sessionSync.status === 'connected') setMessage('Conectado ao vivo.');
     if (event.type === 'remote-update') setMessage(`Atualizado por ${event.user?.name || 'outro usuário'}`);
-    if (event.type === 'closed') { setStatus('closed'); setMessage(event.pending ? 'Sala encerrada. A cópia local pendente foi preservada.' : 'Sessão encerrada. Relatório final disponível para admins.'); }
+    if (event.type === 'closed') { setStatus('closed'); setMessage(event.pending ? 'Sala encerrada com alterações não confirmadas. Baixe uma cópia antes de sair.' : 'Sessão encerrada. Relatório final disponível para admins.'); }
     if (event.type === 'reopened') { setStatus(sessionSync.status); setMessage('Sala reaberta pelo admin.'); }
-    if (event.type === 'error') setMessage(event.message);
+    if (event.type === 'error') { setMessage(event.message); if (event.code === 'auth_required') setAuthRequired(true); }
   }), []);
 
   const content = <><div className="mobile-room-warning"><span className="material-icons" style={{fontSize: 48, marginBottom: 16}}>warning</span><h2>Dispositivo incompatível</h2><p>O painel da sala não é suportado em dispositivos móveis. Acesse por um computador.</p><button className="portal-primary" onClick={onLeave}>Voltar às salas</button></div><div className="room-bar"><span className={`sync-dot ${status}`}></span><div><strong>{room.name}</strong><small>{room.code} · {count} conectado(s){message ? ` · ${message}` : ''}</small></div>{user.role === 'admin' && sessionSync.room?.status === 'closed' && <button onClick={async () => { try { await api(`/api/rooms/${room.id}/reopen`, { method: 'POST' }); } catch (err) { setMessage(err.message); } }}>Reabrir sala</button>}{room.canManage && <button onClick={() => setMembersOpen(true)}>Pessoas</button>}<button onClick={onLeave}>Sair da sala</button></div>{membersOpen && <MembersModal room={room} onClose={() => setMembersOpen(false)} />}</>;
   const syncControls = <>
-    {pending && <div className="sync-pending" role="status">{sessionSync.persisted ? 'Alterações guardadas neste dispositivo' : 'Alterações pendentes — mantenha a aba aberta'}<button onClick={() => sessionSync.downloadPending()}>Baixar cópia local</button></div>}
+    {authRequired && <div className="portal-modal-backdrop"><div className="portal-modal" role="dialog" aria-modal="true" aria-label="Entrar novamente"><h2>É necessário entrar novamente</h2><p>Abra o login em outra aba. Mantenha esta sala aberta para preservar as alterações; ela tentará reconectar automaticamente depois do login. Se o acesso à sala foi removido, peça ao responsável para restaurá-lo.</p><a className="portal-primary" href="/auth/login" target="_blank" rel="noopener noreferrer">Abrir login em outra aba</a><button onClick={() => setAuthRequired(false)}>Voltar à sala</button>{sessionSync.dirty && <button onClick={() => sessionSync.downloadPending()}>Baixar cópia das alterações</button>}</div></div>}
+    {pending && <div className="sync-pending" role="status">{sessionSync.persisted && sessionSync.showLocalWarning ? 'Alterações guardadas neste dispositivo' : 'Alterações não confirmadas — baixe uma cópia antes de sair'}<button onClick={() => sessionSync.downloadPending()}>Baixar cópia local</button><button onClick={() => onLeave({ discardPending: true })}>Descartar pendências e sair</button></div>}
     {conflicts.length > 0 && <div className="portal-modal-backdrop"><div className="portal-modal sync-conflicts" role="dialog" aria-modal="true" aria-label="Conflitos de sincronização">
       <h2>Alterações simultâneas</h2><p>A sala e este dispositivo alteraram os mesmos dados. As demais alterações serão combinadas automaticamente. Escolha quais valores usar nos conflitos abaixo.</p>
       <div className="sync-conflict-list">{conflicts.map((conflict, index) => <div key={index}><strong>{({ notes: 'Nota', events: 'Acontecimento', config: 'Configuração', agenda: 'Agenda', presence: 'Presença', votes: 'Voto', motions: 'Moção', speakers: 'Lista de oradores', timer: 'Cronômetro', speeches: 'Discursos', speakTime: 'Tempo de fala' })[conflict.path.split('.')[0]] || 'Dados da sessão'}</strong><p>Meu valor: {typeof conflict.local === 'string' ? conflict.local : JSON.stringify(conflict.local) ?? 'Excluído'}</p><p>Valor da sala: {typeof conflict.remote === 'string' ? conflict.remote : JSON.stringify(conflict.remote) ?? 'Excluído'}</p></div>)}</div>
@@ -288,36 +316,135 @@ function VisitorBar({ onExit }) {
   return slot ? createPortal(content, slot) : content;
 }
 
+async function prepareRoomExit() {
+  if (!sessionSync.room) return true;
+  try {
+    if (sessionSync.dirty && (!sessionSync.ready || sessionSync.conflict || sessionSync.room.status === 'closed')) {
+      if (!sessionSync.persist()) throw new Error('Não foi possível guardar a fila. Baixe a cópia local antes de sair.');
+    } else await sessionSync.flushPending();
+    return true;
+  } catch (error) { alert(error.message); return false; }
+}
+
 export default function PortalShell() {
+  navigation ||= createNavigation(window);
+  const hash = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot);
+  const route = parseRoute(hash);
+  const roomId = route.page === 'room' ? route.roomId : null;
   const [visitor, setVisitor] = useState(() => localStorage.getItem('simsd-visitor-mode') === '1');
   const [config, setConfig] = useState(null);
   const [user, setUser] = useState(null);
   const [checked, setChecked] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [room, setRoom] = useState(null);
+  const [roomError, setRoomError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const restoringTab = useRef(false);
+  const initializedRoom = useRef(null);
+
+  useEffect(() => navigation.setGuard(async next => {
+    if (sessionSync.room && next.roomId !== sessionSync.room.id) return prepareRoomExit();
+    return true;
+  }), []);
+
   useEffect(() => {
     window.SimSDOfflineMode = visitor;
     if (visitor) { setConfig({ oauthConfigured: false, devAuth: false }); setChecked(true); return; }
     Promise.all([api('/api/config'), fetch('/api/me').then(async response => response.ok ? (await response.json()).user : null)])
-      .then(([appConfig, currentUser]) => { setConfig(appConfig); setUser(currentUser); setChecked(true); })
-      .catch(() => setChecked(true));
+      .then(([appConfig, currentUser]) => {
+        setConfig(appConfig); setUser(currentUser); setChecked(true);
+        if (currentUser) {
+          try {
+            const returnRoute = sessionStorage.getItem('simsd-return-route');
+            sessionStorage.removeItem('simsd-return-route');
+            if (returnRoute?.startsWith('#/')) navigation.navigate(returnRoute, { replace: true });
+          } catch {}
+        }
+      })
+      .catch(() => { setLoadError('Não foi possível carregar o app. Verifique a conexão e tente novamente.'); setChecked(true); });
   }, [visitor]);
-  const enterVisitor = () => { localStorage.setItem('simsd-visitor-mode', '1'); window.SimSDOfflineMode = true; window.SimSDController?.setRoomContext(null); setVisitor(true); };
-  const exitVisitor = () => { localStorage.removeItem('simsd-visitor-mode'); window.SimSDOfflineMode = false; location.reload(); };
-  const enterRoom = selectedRoom => { setRoom(selectedRoom); sessionSync.open(selectedRoom, { userId: user.id }); };
-  const leaveRoom = async () => {
-    try {
-      if (sessionSync.dirty && (!sessionSync.ready || sessionSync.conflict || sessionSync.room?.status === 'closed')) {
-        if (!sessionSync.persist()) throw new Error('Não foi possível guardar a fila. Baixe a cópia local antes de sair.');
-      } else await sessionSync.flushPending();
-      sessionSync.close(); window.SimSDController?.setRoomContext(null); setRoom(null);
-    } catch (error) { alert(error.message); }
+
+  useEffect(() => {
+    if (!user || visitor) return;
+    const restricted = (route.page === 'admin' && user.role !== 'admin') ||
+      (['notes', 'rubrics'].includes(route.page) && !['admin', 'simsd_tools'].includes(user.role)) || route.page === 'visitor';
+    if (restricted) navigation.navigate('#/salas', { replace: true });
+  }, [hash, user, visitor]);
+
+  // Changing only the tab never tears down or reopens the websocket.
+  useEffect(() => {
+    if (!user || visitor) return;
+    let cancelled = false;
+    setRoomError(''); setRoom(null); initializedRoom.current = null;
+    if (sessionSync.room) sessionSync.close();
+    window.SimSDController?.setRoomContext(null);
+    if (roomId) api(`/api/rooms/${roomId}`).then(data => {
+      if (cancelled) return;
+      setRoom(data.room);
+      sessionSync.open(data.room, { userId: user.id });
+    }).catch(error => { if (!cancelled) setRoomError(error.message); });
+    return () => { cancelled = true; };
+  }, [roomId, user?.id, visitor, retry]);
+
+  useEffect(() => {
+    const selectTab = tab => {
+      if (!tab || document.getElementById(`tb-${tab}`)?.classList.contains('on')) return;
+      restoringTab.current = true;
+      try { window.switchTab?.(tab); } finally { restoringTab.current = false; }
+    };
+    const syncTab = () => {
+      const current = parseRoute(navigation.getSnapshot());
+      if (current.page !== 'room' || sessionSync.room?.id !== current.roomId || initializedRoom.current === current.roomId) return;
+      initializedRoom.current = current.roomId;
+      const controller = window.SimSDController;
+      const tab = restoredRoomTab(current.tab, controller?.projection().tab, {
+        independentTabs: controller?.snapshot()?.config?.independentTabs === true,
+        closed: sessionSync.room.status === 'closed',
+      });
+      selectTab(tab);
+      navigation.navigate(`#/sala/${current.roomId}/${tab}`, { replace: true });
+    };
+    const unsubscribe = sessionSync.subscribe(event => {
+      if (event.type === 'closed' || event.type === 'status' && event.status === 'connected') syncTab();
+    });
+    window.SimSDNavigation = {
+      tabChanged(tab, remote) {
+        if (restoringTab.current) return;
+        const current = parseRoute(navigation.getSnapshot());
+        if (current.page === 'room' && initializedRoom.current === current.roomId) {
+          navigation.navigate(`#/sala/${current.roomId}/${tab}`, { replace: remote, passive: remote });
+        } else if (visitor) navigation.navigate(`#/visitante/${tab}`, { replace: remote, passive: remote });
+      },
+    };
+    if (visitor && route.page === 'visitor') selectTab(route.tab);
+    if (roomId && initializedRoom.current === roomId) selectTab(route.tab);
+    return () => { unsubscribe(); delete window.SimSDNavigation; };
+  }, [hash, visitor]);
+
+  const enterVisitor = () => {
+    localStorage.setItem('simsd-visitor-mode', '1'); window.SimSDOfflineMode = true;
+    window.SimSDController?.setRoomContext(null); setVisitor(true);
+    navigation.navigate('#/visitante', { replace: true });
   };
-  const content = useMemo(() => {
-    if (!checked || !config) return <div className="portal-overlay portal-loading">Carregando…</div>;
-    if (visitor) return <VisitorBar onExit={exitVisitor} />;
-    if (!user) return <LoginScreen config={config} onVisitor={enterVisitor} />;
-    if (!room) return <Lobby user={user} onEnterRoom={enterRoom} />;
-    return <RoomBar room={room} user={user} onLeave={leaveRoom} />;
-  }, [checked, config, user, room, visitor]);
-  return <>{content}{user && !visitor && <HelpRequest inRoom={Boolean(room)} />}</>;
+  const exitVisitor = () => {
+    localStorage.removeItem('simsd-visitor-mode'); window.SimSDOfflineMode = false;
+    history.replaceState(history.state, '', '#/salas'); location.reload();
+  };
+  const enterRoom = selectedRoom => navigation.navigate(`#/sala/${selectedRoom.id}`);
+  const leaveRoom = async (options = {}) => {
+    if (options.discardPending === true) {
+      if (!window.confirm('Descartar as alterações locais não confirmadas e sair? Baixe uma cópia antes se quiser guardá-las. Dados já recebidos pelo servidor não serão apagados.')) return;
+      sessionSync.discardPending();
+    }
+    await navigation.navigate('#/salas');
+  };
+  let content;
+  if (loadError) content = <div className="portal-overlay portal-loading"><p role="alert">{loadError}</p><button onClick={() => location.reload()}>Tentar novamente</button></div>;
+  else if (!checked || !config) content = <div className="portal-overlay portal-loading">Carregando…</div>;
+  else if (visitor) content = <VisitorBar onExit={exitVisitor} />;
+  else if (!user) content = <LoginScreen config={config} onVisitor={enterVisitor} />;
+  else if (roomId && (!room || room.id !== roomId)) content = <div className="portal-overlay portal-loading"><p role={roomError ? 'alert' : undefined}>{roomError || 'Abrindo sala…'}</p>{roomError && <><button onClick={() => setRetry(value => value + 1)}>Tentar novamente</button><button onClick={() => navigation.navigate('#/salas')}>Voltar às salas</button></>}</div>;
+  else if (roomId) content = <RoomBar key={room.id} room={room} user={user} onLeave={leaveRoom} />;
+  else content = <Lobby user={user} route={route} onEnterRoom={enterRoom} />;
+  return <>{content}{user && !visitor && <HelpRequest inRoom={Boolean(roomId && room)} />}</>;
 }

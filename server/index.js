@@ -17,6 +17,7 @@ import { rubricOptions, consolidateRubrics, applyFinalAssessments } from './rubr
 import { buildRubricDocx } from './rubricDocx.js';
 import { sendHelpRequest } from './helpRequests.js';
 import { serializeSessionState } from './sessionState.js';
+import { previewPendingImport } from './pendingImport.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -24,6 +25,12 @@ const HOST = process.env.HOST || '127.0.0.1';
 const DIST_DIR = resolve('dist');
 const DEV_AUTH = process.env.SIMSD_DEV_AUTH === '1';
 const socketsByRoom = new Map();
+const projectorByRoom = new Map();
+const projectionTabs = new Set(['gsl', 'motions', 'mod', 'unmod', 'solo', 'vote', 'presence', 'notes']);
+function projectorState(roomId) {
+  const selected = projectorByRoom.get(roomId);
+  return selected ? { clientId: selected.socket.simsdClientId, name: selected.socket.simsdUser.name, tab: selected.tab, speechMode: selected.speechMode } : null;
+}
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -160,11 +167,31 @@ async function handleApi(req, res, url) {
       id: `dev-${suffix}`, name: body.name || `Teste ${role}`, role,
       email: `${suffix}@dev.local`, login: `${suffix}@dev.local`, committee: role === 'student' ? 'unesco' : null,
     });
-    createAppSession(res, user, 12 * 3600);
+    createAppSession(res, user);
     return sendJson(res, 200, { user: publicUser(user) });
   }
 
   const user = requireUser(req);
+  if (['/api/admin/pending-import/preview', '/api/admin/pending-import/apply'].includes(url.pathname)) {
+    requireAdmin(req);
+    if (method !== 'POST') throw Object.assign(new Error('Método não permitido.'), { status: 405 });
+    const body = await readJson(req, 12_000_000);
+    const roomId = body?.backup?.room?.id;
+    const room = typeof roomId === 'string' ? roomById(roomId) : null;
+    const preview = previewPendingImport(body?.backup, room, body?.preference ?? null);
+    if (url.pathname.endsWith('/preview')) {
+      const { state, ...result } = preview;
+      return sendJson(res, 200, result);
+    }
+    if (body.token !== preview.token) throw Object.assign(new Error('A sala ou o arquivo mudou. Analise o arquivo novamente antes de aplicar.'), { status: 409 });
+    if (preview.conflicts.length && !body.preference) throw Object.assign(new Error('Escolha se os conflitos devem usar os valores do arquivo ou da sala.'), { status: 409 });
+    const updatedAt = nowIso();
+    appendSessionEvent(preview.state, 'session.pending_imported', { actor: { id: user.id, name: user.name } }, updatedAt);
+    const serialized = serializeSessionState(preview.state);
+    db.prepare('UPDATE rooms SET session_state=?,state_version=state_version+1,updated_at=? WHERE id=?').run(serialized, updatedAt, room.id);
+    broadcast(room.id, { type: 'state:update', state: preview.state, version: preview.version + 1, updatedBy: publicUser(user), updatedAt });
+    return sendJson(res, 200, { ok: true, room: preview.room });
+  }
   if (url.pathname === '/api/help' && method === 'POST') {
     return sendJson(res, 200, await sendHelpRequest(await readJson(req, 8192)));
   }
@@ -441,6 +468,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 wss.on('connection', (ws, _req, room) => {
+  ws.simsdClientId = randomUUID();
   // ws emits error for oversized/invalid frames; without a listener Node exits.
   ws.on('error', () => ws.terminate());
   ws.isAlive = true;
@@ -449,7 +477,7 @@ wss.on('connection', (ws, _req, room) => {
   if (!socketsByRoom.has(room.id)) socketsByRoom.set(room.id, new Set());
   socketsByRoom.get(room.id).add(ws);
   ws.send(JSON.stringify({
-    type: 'state:init', room: publicRoom(room, ws.simsdUser),
+    type: 'state:init', room: publicRoom(room, ws.simsdUser), clientId: ws.simsdClientId, projector: projectorState(room.id),
     state: JSON.parse(room.session_state || 'null'), version: room.state_version,
   }));
   broadcastPresence(room.id);
@@ -458,13 +486,13 @@ wss.on('connection', (ws, _req, room) => {
     let requestId;
     try {
       const message = JSON.parse(raw.toString());
-      if (!message || !['state:update', 'state:request'].includes(message.type)) return;
+      if (!message || !['state:update', 'state:request', 'projector:select', 'projector:tab'].includes(message.type)) return;
       requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 100) : undefined;
       const current = roomById(room.id);
       if (!ws.simsdViewer) {
         const user = getAuthenticatedUser(_req);
         if (!user || !current || !canAccessRoom(current, user)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Sua sessão expirou ou o acesso foi removido.', requestId }));
+          ws.send(JSON.stringify({ type: 'error', code: 'auth_required', message: 'Sua sessão expirou ou o acesso foi removido.', requestId }));
           ws.close(1008, 'Acesso expirado');
           return;
         }
@@ -476,6 +504,19 @@ wss.on('connection', (ws, _req, room) => {
       }
       if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.', requestId }));
       if (!current || current.status !== 'open') return ws.send(JSON.stringify({ type: 'error', message: 'A sala está encerrada.', requestId }));
+      if (message.type === 'projector:select' || message.type === 'projector:tab') {
+        const selected = projectorByRoom.get(room.id);
+        if (message.type === 'projector:select' && message.enabled === false) {
+          if (selected?.socket !== ws) return;
+          projectorByRoom.delete(room.id);
+        } else {
+          if (message.type === 'projector:tab' && selected?.socket !== ws) return;
+          if (!projectionTabs.has(message.tab) || !['gsl', 'mod', 'solo'].includes(message.speechMode)) return;
+          projectorByRoom.set(room.id, { socket: ws, tab: message.tab, speechMode: message.speechMode });
+        }
+        broadcast(room.id, { type: 'projector:state', projector: projectorState(room.id) });
+        return;
+      }
       if (Number(message.baseVersion) !== current.state_version) {
         return ws.send(JSON.stringify({
           type: 'state:conflict', state: JSON.parse(current.session_state || 'null'), version: current.state_version, requestId,
@@ -493,6 +534,10 @@ wss.on('connection', (ws, _req, room) => {
     }
   });
   ws.on('close', () => {
+    if (projectorByRoom.get(room.id)?.socket === ws) {
+      projectorByRoom.delete(room.id);
+      broadcast(room.id, { type: 'projector:state', projector: null });
+    }
     socketsByRoom.get(room.id)?.delete(ws);
     if (!socketsByRoom.get(room.id)?.size) socketsByRoom.delete(room.id);
     else broadcastPresence(room.id);

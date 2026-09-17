@@ -10,6 +10,11 @@ const COOKIE_SECURE = process.env.SIMSD_COOKIE_SECURE !== '0';
 export const SESSION_COOKIE = 'simsd_session';
 const FLOW_COOKIE = 'simsd_oauth_state';
 
+export function sessionLifetimeSeconds() {
+  const hours = Number(process.env.SIMSD_SESSION_HOURS || 24);
+  return (Number.isInteger(hours) && hours >= 24 && hours <= 720 ? hours : 24) * 3600;
+}
+
 export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -96,12 +101,15 @@ export async function finishOAuth(req, res, url) {
     throw Object.assign(new Error('Perfil SimSD inválido ou não autorizado.'), { status: 403 });
   }
   const user = upsertPortalUser(profile);
-  createAppSession(res, user, Math.min(Number(tokenData.expires_in) || 3600, 3600));
+  // The portal token is used only to fetch the profile, then discarded.
+  // The app's own session must not inherit its shorter expiry.
+  createAppSession(res, user);
   res.writeHead(302, { Location: '/' });
   res.end();
 }
 
-export function createAppSession(res, user, lifetimeSeconds = 3600) {
+export function createAppSession(res, user) {
+  const lifetimeSeconds = sessionLifetimeSeconds();
   const token = base64url(randomBytes(32));
   const now = new Date();
   db.prepare('INSERT INTO app_sessions(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)')

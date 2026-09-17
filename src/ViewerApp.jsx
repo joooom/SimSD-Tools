@@ -13,6 +13,7 @@ function Flag({ code, fallback, iso, size }) {
 
 export default function ViewerApp({ roomId }) {
   const [state, setState] = useState(null);
+  const [projector, setProjector] = useState(null);
   const [room, setRoom] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [error, setError] = useState('');
@@ -39,8 +40,11 @@ export default function ViewerApp({ roomId }) {
     }
 
     const unsub = sessionSync.subscribe(event => {
+      if (event.type === 'room') setRoom(event.room);
+      if (event.type === 'projector') setProjector(event.projector);
       if (event.type === 'status') {
         setStatus(event.status);
+        if (event.status === 'connected') setError('');
       }
       if (event.type === 'error') {
         setError(event.message);
@@ -50,59 +54,29 @@ export default function ViewerApp({ roomId }) {
         setStatus('closed');
         setClosedMessage('Sessão encerrada');
       }
-      if (event.type === 'reopened') setStatus('connected');
+      if (event.type === 'reopened') { setStatus('connected'); setClosedMessage(''); setError(''); }
     });
 
     // Override applyRemoteState so sessionSync pushes updates here instead of window.SimSDController
     window.SimSDController = {
       applyRemoteState: (newState) => {
-        setState(prev => ({ ...(prev || {}), ...newState }));
+        setState(newState);
       },
       setRoomContext: () => { },
     };
 
-    // Override fetch room info via ws init
-    const originalWsMessage = sessionSync.socket?.onmessage;
-
-    // We open with mode=viewer
     sessionSync.open({ id: roomId }, { mode: 'viewer' });
-
-    // Handle initial state manually if needed, but sessionSync handles state:init and calls applyRemoteState
-    const interceptor = sessionSync.subscribe((event) => {
-      // room is emitted only when state:init happens? No, sessionSync doesn't emit room in init.
-    });
-
     return () => {
       unsub();
-      interceptor();
       sessionSync.close();
       window.SimSDController = null;
     };
   }, [roomId]);
-
-  // Handle manual extraction of room info since sessionSync doesn't expose it directly on state:init easily
-  useEffect(() => {
-    const handleWsMsg = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'state:init') {
-          setRoom(msg.room);
-          if (msg.room?.status === 'closed') {
-            setStatus('closed');
-            setClosedMessage('Sessão encerrada');
-          }
-        }
-      } catch { }
-    };
-    if (sessionSync.socket) {
-      sessionSync.socket.addEventListener('message', handleWsMsg);
-    }
-  }, [status]); // re-bind if socket reconnects
-
-  if (status === 'error') return <div className="viewer-screen center-msg"><div className="err-msg">{error}</div></div>;
-  if (status === 'connecting') return <div className="viewer-screen center-msg"><div className="loading-spinner"></div><h2>Conectando...</h2></div>;
+  const recovery = <p><button onClick={() => location.reload()}>Tentar novamente</button> <a href="/">Voltar ao início</a></p>;
+  if (status === 'error' || status === 'deleted') return <div className="viewer-screen center-msg"><div className="err-msg">{error || 'Esta sala foi excluída.'}</div>{recovery}</div>;
+  if ((status === 'connecting' || status === 'disconnected') && !state) return <div className="viewer-screen center-msg"><div className="loading-spinner"></div><h2>Conectando à sala…</h2><p>Se a conexão não voltar, confira o endereço da sala.</p>{recovery}</div>;
   if (status === 'closed') return <div className="viewer-screen center-msg"><h1>{closedMessage}</h1><p>A sessão foi encerrada pela mesa.</p></div>;
-  if (!state) return <div className="viewer-screen center-msg"><div className="loading-spinner"></div><h2>Sincronizando estado...</h2></div>;
+  if (!state) return <div className="viewer-screen center-msg"><h2>Aguardando a mesa iniciar a sessão</h2><p>{room?.name}</p>{recovery}</div>;
 
   return (
     <div className="viewer-app">
@@ -127,7 +101,8 @@ export default function ViewerApp({ roomId }) {
       </header>
 
       <main className="v-main">
-        <ActiveView state={state} lastPresenceChange={lastPresenceChange} />
+        {status !== 'connected' && <p role="status">Sem conexão ao vivo. Exibindo os últimos dados recebidos.</p>}
+        <ActiveView state={projector ? { ...state, activeTab: projector.tab, speechMode: projector.speechMode } : state} lastPresenceChange={lastPresenceChange} />
       </main>
     </div>
   );
@@ -135,7 +110,7 @@ export default function ViewerApp({ roomId }) {
 
 function calculatePresence(state) {
   if (!state.committeeCountries) return 0;
-  return state.committeeCountries.filter(c => state.presence[c.c] !== 'ausente' && c.voto !== false).length;
+  return state.committeeCountries.filter(c => ['presente', 'presente-votante'].includes(state.presence?.[c.c]) && c.voto !== false).length;
 }
 
 function calculateMajority(state) {
