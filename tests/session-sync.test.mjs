@@ -28,6 +28,19 @@ function init(state = {}, version = 0, status = 'open') {
   sessionSync.socket.receive({ type: 'state:init', state, version, room: { status } });
 }
 
+test('leaving and reentering a room keeps exactly one live session socket', () => {
+  const sockets = [];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    sessionSync.open({ id: 'same-room', status: 'open' });
+    init({ notes: [] });
+    sockets.push(sessionSync.socket);
+    assert.equal(sockets.filter(socket => socket.readyState === FakeSocket.OPEN).length, 1);
+    sessionSync.close();
+    assert.equal(sockets.filter(socket => socket.readyState === FakeSocket.OPEN).length, 0);
+    assert.equal(sessionSync.room, null);
+  }
+});
+
 test('room metadata reaches viewers without attaching socket listeners', () => {
   const events = [];
   const unsubscribe = sessionSync.subscribe(event => { if (event.type === 'room') events.push(event.room); });

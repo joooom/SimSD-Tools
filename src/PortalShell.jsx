@@ -447,7 +447,7 @@ export default function PortalShell() {
   else if (visitor) content = <VisitorBar onExit={exitVisitor} />;
   else if (!user) content = <LoginScreen config={config} onVisitor={enterVisitor} />;
   else if (roomId && (!room || room.id !== roomId)) content = <div className="portal-overlay portal-loading"><p role={roomError ? 'alert' : undefined}>{roomError || 'Abrindo sala…'}</p>{roomError && <><button onClick={() => setRetry(value => value + 1)}>Tentar novamente</button><button onClick={() => navigation.navigate('#/salas')}>Voltar às salas</button></>}</div>;
-  else if (roomId) content = <RoomBar key={room.id} room={room} user={user} onLeave={leaveRoom} />;
+  else if (roomId) content = <RoomBar key={`room-bar:${room.id}`} room={room} user={user} onLeave={leaveRoom} />;
   else content = <Lobby user={user} route={route} onEnterRoom={enterRoom} />;
-  return <>{content}{user && !visitor && (!roomId || room?.id === roomId) && <HelpRequest key={roomId || 'lobby'} user={user} activeRoom={roomId ? room : null} inRoom={Boolean(roomId && room)} />}</>;
+  return <>{content}{user && !visitor && (!roomId || room?.id === roomId) && <HelpRequest key={`help:${roomId || 'lobby'}`} user={user} activeRoom={roomId ? room : null} inRoom={Boolean(roomId && room)} />}</>;
 }
