@@ -1,5 +1,5 @@
 import { copyState, mergeSession, sameState } from './sessionMerge.js';
-import { statePatch } from './src/sessionPatch.js';
+import { statePatch } from './sessionPatch.js';
 
 export class SessionSync {
   constructor() {

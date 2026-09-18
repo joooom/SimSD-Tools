@@ -1,4 +1,4 @@
-export { projectedState } from './src/clockState.js';
+export { projectedState } from './clockState.js';
 
 // Intervals repaint; elapsed time, not the number of callbacks, drives clocks.
 export function startCountdown(clock, tick, now = () => performance.now(), serverNow = () => window.SimSDSync?.serverNow?.() ?? Date.now()) {
