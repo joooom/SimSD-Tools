@@ -1623,13 +1623,46 @@ function startFreshRoom(committeeKey){
 function applyRemoteState(snapshot){
   if(!snapshot)return;
   const previousTab=currentTab();
-  stopAll();
+  const previous=S;
+  // Runtime handles belong to this browser. A shared snapshot always serializes
+  // running=false; that is not a pause command from another editor.
+  const controls=(state,key)=>{
+    const clock=state[key];
+    const mode=key==='timer'?'gsl':key;
+    return JSON.stringify({
+      total:clock?.total,totalTotal:clock?.totalTotal,spkTotal:clock?.spkTotal,
+      speaker:key==='timer'?state.speakers?.[state.curIdx]?.c:key==='mod'?clock?.spks?.[0]?.c:clock?.code,
+      activity:state.eventActivities?.[mode]?.id,
+      debate:key==='mod'?state.eventActivities?.['mod-debate']?.id:undefined,
+    });
+  };
+  const knownEvents=new Set((previous.events||[]).map(event=>event.id));
+  const kept=new Set();
+  for(const key of ['timer','mod','unmod','solo']){
+    if(!previous[key]?.running)continue;
+    const mode=key==='timer'?'gsl':key;
+    const remoteControl=(snapshot.events||[]).some(event=>!knownEvents.has(event.id)
+      &&event.details?.mode===mode&&/^(speech|debate)\.(started|paused|resumed|finished|configured)$/.test(event.type));
+    if(!readOnly&&!snapshot.sessionEnded&&snapshot.committeeKey===previous.committeeKey
+      &&snapshot[key]&&controls(previous,key)===controls(snapshot,key)&&!remoteControl)kept.add(key);
+    else clearInterval(previous[key].iv);
+  }
   applyingRemoteState=true;
   hydrateState(snapshot);
+  for(const key of kept){
+    // Keep the existing interval and its progress, including across a reconnect
+    // whose snapshot may be a few ticks behind. Other shared fields still merge.
+    const fields=key==='mod'?['totalSec','spkSec','running','iv']:['sec','running','iv'];
+    for(const field of fields)S[key][field]=previous[key][field];
+  }
   if(activeRoomId&&S.config.independentTabs===true)localActiveTab=localActiveTab||previousTab||S.activeTab;
   else localActiveTab=null;
   if(!activeRoomId)try{localStorage.setItem(stateStorageKey(),JSON.stringify(sessionSnapshot()));}catch(e){}
   showCurrentState();
+  for(const [key,button] of [['timer','gsl'],['mod','mod'],['unmod','unmod'],['solo','solo']]){
+    const element=document.getElementById(`btn-${button}-pp`);
+    if(element)element.textContent=S[key]?.running?'pause':'play_arrow';
+  }
   applyingRemoteState=false;
   window.SimSDSync?.publishProjectorTab();
 }

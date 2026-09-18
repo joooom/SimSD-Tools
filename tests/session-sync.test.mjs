@@ -154,6 +154,7 @@ test('legacy chair save and remote state application never write session data lo
   const context = {
     readOnly: false, activeRoomId: 'room', applyingRemoteState: false,
     currentTab: () => 'gsl', S: { config: {} }, localActiveTab: null,
+    document: { getElementById: () => null },
     sessionSnapshot: () => ({ notes: [] }), stateStorageKey: () => 'session',
     localStorage: { setItem: () => { writes++; } },
     window: { SimSDSync: { pushState: () => { sends++; }, publishProjectorTab() {} } },
@@ -481,4 +482,89 @@ test('snapshot acknowledgement does not conflict with newer edits to the same no
   socket.receive({ type: 'state:ack', version: 2, requestId: sessionSync.requestId });
   assert.equal(sessionSync.dirty, false);
   assert.equal(storage.size, 0);
+});
+
+function timerClient() {
+  const source = readFileSync(new URL('../script.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const intervals = new Map(), nodes = new Map();
+  let nextId = 0;
+  const ctx = {
+    activeRoomId: 'room', localActiveTab: null, applyingRemoteState: false, readOnly: false,
+    window: {}, currentTab: () => 'gsl', showCurrentState() {},
+    document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id); } },
+    setInterval(fn) { const id = ++nextId; intervals.set(id, fn); return id; },
+    clearInterval(id) { intervals.delete(id); },
+    activityToggle() {}, save() {}, updateGslTimer() {}, updateModDisplay() {}, updateUnmodDisplay() {}, updateSoloDisplay() {},
+  };
+  runInNewContext([
+    section('function makeDefaultState(){', 'let S=makeDefaultState();'),
+    'var S=makeDefaultState();',
+    section('function hydrateState(p){', 'function load(){'),
+    section('function gslPP(){', 'function gslReset(){'),
+    section('function modPP(){', 'function modReset(){'),
+    section('function unmodPP(){', 'function unmodReset(){'),
+    section('function soloPP(){', 'function soloReset(){'),
+    section('function applyRemoteState(', 'function reportHTMLForState('),
+  ].join('\n'), ctx);
+  ctx.S.speakers = [{ c: 'Brasil' }]; ctx.S.solo.code = 'Brasil';
+  ctx.S.mod.spks = [{ c: 'Brasil' }];
+  for (const mode of ['gsl', 'mod', 'mod-debate', 'unmod', 'solo']) ctx.S.eventActivities[mode] = { id: mode };
+  return {
+    ctx, intervals, nodes,
+    tick() { for (const fn of [...intervals.values()]) fn(); },
+    snapshot() { return JSON.parse(runInNewContext('JSON.stringify(sessionSnapshot())', ctx)); },
+    apply(state) { ctx.remote = state; runInNewContext('applyRemoteState(remote)', ctx); },
+    start(mode) { runInNewContext(`${mode}PP()`, ctx); },
+  };
+}
+
+for (const [mode, key, seconds] of [['gsl', 'timer', 'sec'], ['mod', 'mod', 'spkSec'], ['unmod', 'unmod', 'sec'], ['solo', 'solo', 'sec']]) {
+  test(`${mode}: remote notes and stale reconnect snapshots preserve ticking without duplicate intervals`, () => {
+    const client = timerClient(); client.start(mode);
+    const stale = client.snapshot();
+    for (let i = 0; i < 3; i++) client.tick();
+    const remaining = client.ctx.S[key][seconds], handle = client.ctx.S[key].iv;
+    const remote = client.snapshot(); remote.notes.push({ id: 'note', text: 'Remote note' });
+    client.apply(remote);
+    assert.equal(client.ctx.S[key].running, true);
+    assert.equal(client.ctx.S.notes.length, 1);
+    assert.equal(client.ctx.S[key].iv, handle);
+    client.tick();
+    assert.equal(client.ctx.S[key][seconds], remaining - 1);
+    client.apply(stale);
+    assert.equal(client.ctx.S[key][seconds], remaining - 1);
+    assert.equal(client.intervals.size, 1);
+    assert.equal(client.nodes.get(`btn-${mode}-pp`).textContent, 'pause');
+    client.tick(); assert.equal(client.ctx.S[key][seconds], remaining - 2);
+  });
+
+  for (const reason of ['pause', 'finish', 'duration', 'closed', 'readonly']) {
+    test(`${mode}: remote ${reason} stops the local interval`, () => {
+      const client = timerClient(); client.start(mode); client.tick();
+      const remote = client.snapshot();
+      if (reason === 'pause') remote.events.push({ id: 'pause', type: 'speech.paused', details: { mode } });
+      if (reason === 'finish') delete remote.eventActivities[mode];
+      if (reason === 'duration') remote[key][key === 'mod' ? 'spkTotal' : 'total'] += 10;
+      if (reason === 'closed') remote.sessionEnded = true;
+      if (reason === 'readonly') client.ctx.readOnly = true;
+      client.apply(remote);
+      assert.equal(client.ctx.S[key].running, false);
+      assert.equal(client.intervals.size, 0);
+      assert.equal(client.nodes.get(`btn-${mode}-pp`).textContent, 'play_arrow');
+    });
+  }
+}
+
+test('remote speaker changes stop the speech and remote running flags never start a second clock', () => {
+  for (const mode of ['gsl', 'mod', 'solo']) {
+    const client = timerClient(); client.start(mode);
+    const remote = client.snapshot();
+    if (mode === 'gsl') remote.speakers[0].c = 'Chile';
+    if (mode === 'mod') remote.mod.spks[0].c = 'Chile';
+    if (mode === 'solo') remote.solo.code = 'Chile';
+    client.apply(remote); assert.equal(client.intervals.size, 0);
+    remote[mode === 'gsl' ? 'timer' : mode].running = true;
+    client.apply(remote); assert.equal(client.intervals.size, 0);
+  }
 });
