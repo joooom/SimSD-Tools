@@ -1,4 +1,5 @@
 import { copyState, mergeSession, sameState } from './sessionMerge.js';
+import { statePatch } from '../server/sessionPatch.js';
 
 export class SessionSync {
   constructor() {
@@ -11,6 +12,20 @@ export class SessionSync {
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit(event) { for (const listener of this.listeners) listener(event); }
   setStatus(status) { if (this.status === status) return; this.status = status; this.emit({ type: 'status', status }); }
+  serverNow() { return this.timeAnchor ? this.timeAnchor.server + performance.now() - this.timeAnchor.local : Date.now(); }
+  diagnostics() {
+    return { status: this.status, version: this.version, pending: this.dirty,
+      roundTripMs: this.roundTripMs ?? null, lastMessageAt: this.lastMessageAt ?? null,
+      lastStateAt: this.lastStateAt ?? null, bufferedBytes: this.socket?.bufferedAmount ?? 0 };
+  }
+  ping() {
+    if (!this.ready || !this.capabilities?.heartbeat || this.pingRequest) return;
+    const request = { id: crypto.randomUUID(), at: performance.now() };
+    this.pingRequest = request;
+    try { this.socket.send(JSON.stringify({ type: 'sync:ping', id: request.id })); }
+    catch { this.disconnected(); return; }
+    this.pongTimer = setTimeout(() => this.disconnected(), 10000);
+  }
   get dirty() { return Boolean(this.pendingState || this.inFlightState); }
   get localState() { return this.pendingState || this.inFlightState; }
   get showLocalWarning() { return this.dirty && !this.ready && this.offlineMode; }
@@ -88,6 +103,7 @@ export class SessionSync {
     if (!this.room) return;
     const socket = this.socket; this.socket = null; socket?.close();
     clearTimeout(this.connectionTimer); clearTimeout(this.ackTimer);
+    clearTimeout(this.pingTimer); clearTimeout(this.pongTimer); this.pingRequest = null;
     this.pendingState = this.localState; this.inFlightState = null;
     this.sending = false; this.requestId = null; this.ready = false;
     this.startOfflineGrace(); this.persist(); this.setStatus('disconnected');
@@ -96,6 +112,20 @@ export class SessionSync {
     this.retryTimer = setTimeout(() => this.connect(), Math.min(15000, 1000 * 2 ** Math.min(this.retryCount++, 4)));
   }
   receive(message) {
+    this.lastMessageAt = Date.now();
+    if (['state:init', 'state:update', 'state:snapshot'].includes(message.type)) this.lastStateAt = this.lastMessageAt;
+    if (message.type === 'sync:pong') {
+      if (message.id !== this.pingRequest?.id || !Number.isFinite(message.serverTime)) return;
+      const local = performance.now(), rtt = Math.max(0, local - this.pingRequest.at);
+      this.roundTripMs = Math.round(rtt);
+      clearTimeout(this.pongTimer); this.pingRequest = null;
+      if (this.bestRtt == null || rtt <= this.bestRtt) {
+        this.bestRtt = rtt; this.timeAnchor = { local, server: message.serverTime + rtt / 2 };
+      }
+      this.emit({ type: 'latency', rtt, receivedAt: Date.now() });
+      this.pingTimer = setTimeout(() => this.ping(), 5000);
+      return;
+    }
     if (message.type === 'projector:state') {
       this.projector = message.projector;
       window.SimSDController?.updateProjector?.();
@@ -103,10 +133,14 @@ export class SessionSync {
       return;
     }
     if (message.type === 'state:init') {
+      this.capabilities = message.capabilities || {};
+      this.bestRtt = null;
+      if (!this.timeAnchor && Number.isFinite(message.serverTime)) this.timeAnchor = { server: message.serverTime, local: performance.now() };
       this.clientId = message.clientId; this.projector = message.projector || null;
       window.SimSDController?.updateProjector?.();
       this.emit({ type: 'projector', projector: this.projector });
       clearTimeout(this.connectionTimer); this.ready = true; this.retryCount = 0;
+      this.ping();
       clearTimeout(this.offlineTimer); this.offlineTimer = null;
       this.offlineMode = false;
       this.room = { ...this.room, ...message.room };
@@ -224,7 +258,10 @@ export class SessionSync {
     this.inFlightState = this.pendingState; this.pendingState = null; this.sending = true;
     this.requestId = crypto.randomUUID(); this.persist();
     try {
-      this.socket.send(JSON.stringify({ type: 'state:update', state: this.inFlightState, baseVersion: this.version, requestId: this.requestId }));
+      const payload = this.capabilities?.patches && this.baseState
+        ? { type: 'state:patch', patch: statePatch(this.baseState, this.inFlightState) }
+        : { type: 'state:update', state: this.inFlightState };
+      this.socket.send(JSON.stringify({ ...payload, baseVersion: this.version, requestId: this.requestId }));
       this.ackTimer = setTimeout(() => {
         if (this.socket?.readyState !== WebSocket.OPEN) return this.disconnected();
         // Recover a lost acknowledgement over this same connection, without
@@ -282,7 +319,9 @@ export class SessionSync {
     if (this.room && this.dirty) this.persist();
     window.removeEventListener?.('online', this.onlineHandler);
     window.removeEventListener?.('pagehide', this.pageHideHandler);
-    for (const timer of [this.pushTimer, this.retryTimer, this.connectionTimer, this.ackTimer, this.offlineTimer]) clearTimeout(timer);
+    for (const timer of [this.pushTimer, this.retryTimer, this.connectionTimer, this.ackTimer, this.offlineTimer, this.pingTimer, this.pongTimer]) clearTimeout(timer);
+    this.pingRequest = null; this.capabilities = null; this.timeAnchor = null; this.bestRtt = null;
+    this.roundTripMs = null; this.lastMessageAt = null; this.lastStateAt = null;
     this.offlineTimer = null; this.offlineMode = false; this.persisted = false;
     const socket = this.socket; this.socket = null; socket?.close();
     this.room = null; this.pendingState = null; this.inFlightState = null; this.baseState = null;

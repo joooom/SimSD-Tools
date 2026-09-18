@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { sessionSync } from './sessionSync.js';
 import { dispName, flagImg } from './utils/flags.js';
 import './viewer.css';
+import { projectedState } from './countdown.js';
 
 const logoAlt = '/simsd-square.svg';
 
@@ -16,6 +17,7 @@ export default function ViewerApp({ roomId }) {
   const [projector, setProjector] = useState(null);
   const [room, setRoom] = useState(null);
   const [status, setStatus] = useState('connecting');
+  const [slowConnection, setSlowConnection] = useState(false);
   const [error, setError] = useState('');
   const [closedMessage, setClosedMessage] = useState('');
   const [lastPresenceChange, setLastPresenceChange] = useState(null);
@@ -40,6 +42,7 @@ export default function ViewerApp({ roomId }) {
     }
 
     const unsub = sessionSync.subscribe(event => {
+      if (event.type === 'latency') setSlowConnection(event.rtt > 2000);
       if (event.type === 'room') setRoom(event.room);
       if (event.type === 'projector') setProjector(event.projector);
       if (event.type === 'status') {
@@ -101,11 +104,32 @@ export default function ViewerApp({ roomId }) {
       </header>
 
       <main className="v-main">
-        {status !== 'connected' && <p role="status">Sem conexão ao vivo. Exibindo os últimos dados recebidos.</p>}
-        <ActiveView state={projector ? { ...state, activeTab: projector.tab, speechMode: projector.speechMode } : state} lastPresenceChange={lastPresenceChange} />
+        {status !== 'connected' && <p role="status">Sem conexão ao vivo. Reconectando; a contagem pode estar estimada.</p>}
+        {status === 'connected' && slowConnection && <p role="status">Conexão lenta. Atualizações da mesa podem chegar com atraso.</p>}
+        <LiveView state={state} projector={projector} lastPresenceChange={lastPresenceChange} />
       </main>
     </div>
   );
+}
+
+function LiveView({ state, projector, lastPresenceChange }) {
+  const received = React.useRef({ state, at: performance.now() });
+  if (received.current.state !== state) received.current = { state, at: performance.now() };
+  const [now, setNow] = useState(() => sessionSync.serverNow());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(sessionSync.serverNow()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const age = Math.max(0, performance.now() - received.current.at);
+  const running = ['timer', 'mod', 'unmod', 'solo'].some(key => state[key]?.playback?.running);
+  const stale = running && age > 15000;
+  // Brief outages can be bridged using the known deadline. Beyond the grace
+  // period stop estimating and explicitly ask for fresh authoritative data.
+  const visible = projectedState(state, Math.max(now, sessionSync.serverNow()) - Math.max(0, age - 15000));
+  return <>
+    {stale && <p role="status">A mesa está sem enviar atualizações. Contagem estimada suspensa; aguardando sincronização.</p>}
+    <ActiveView state={projector ? { ...visible, activeTab: projector.tab, speechMode: projector.speechMode } : visible} lastPresenceChange={lastPresenceChange} />
+  </>;
 }
 
 function calculatePresence(state) {

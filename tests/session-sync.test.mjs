@@ -87,7 +87,7 @@ test('configuration changes preserve the running timer unless its duration chang
     S: { config: { defaultTime: 60 }, activeTab: 'gsl', timer: { total: 60, sec: 37, running: true, iv: 123 } },
     activeRoomId: 'room', localActiveTab: null,
     document: { getElementById: id => fields[id] || (fields[id] = {}) },
-    finishActivity() { finished++; }, clearInterval() {}, logEvent() {}, closePanel() {}, updateGslTimer() {},
+    finishActivity() { finished++; }, stopCountdown() {}, clearInterval() {}, logEvent() {}, closePanel() {}, updateGslTimer() {},
     save() { saved++; }, alert() { alerts++; },
   };
   runInNewContext(`${fn}\nsaveConfig();`, ctx);
@@ -488,16 +488,18 @@ function timerClient() {
   const source = readFileSync(new URL('../script.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const intervals = new Map(), nodes = new Map();
-  let nextId = 0;
+  let nextId = 0, elapsed = 0;
   const ctx = {
     activeRoomId: 'room', localActiveTab: null, applyingRemoteState: false, readOnly: false,
     window: {}, currentTab: () => 'gsl', showCurrentState() {},
+    performance: { now: () => elapsed },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id); } },
     setInterval(fn) { const id = ++nextId; intervals.set(id, fn); return id; },
     clearInterval(id) { intervals.delete(id); },
     activityToggle() {}, save() {}, updateGslTimer() {}, updateModDisplay() {}, updateUnmodDisplay() {}, updateSoloDisplay() {},
   };
   runInNewContext([
+    readFileSync(new URL('../src/countdown.js', import.meta.url), 'utf8').replace(/^export \{.*$/gm, '').replaceAll('export function', 'function'),
     section('function makeDefaultState(){', 'let S=makeDefaultState();'),
     'var S=makeDefaultState();',
     section('function hydrateState(p){', 'function load(){'),
@@ -512,7 +514,7 @@ function timerClient() {
   for (const mode of ['gsl', 'mod', 'mod-debate', 'unmod', 'solo']) ctx.S.eventActivities[mode] = { id: mode };
   return {
     ctx, intervals, nodes,
-    tick() { for (const fn of [...intervals.values()]) fn(); },
+    tick(ms = 1000) { elapsed += ms; for (const fn of [...intervals.values()]) fn(); },
     snapshot() { return JSON.parse(runInNewContext('JSON.stringify(sessionSnapshot())', ctx)); },
     apply(state) { ctx.remote = state; runInNewContext('applyRemoteState(remote)', ctx); },
     start(mode) { runInNewContext(`${mode}PP()`, ctx); },
@@ -567,4 +569,53 @@ test('remote speaker changes stop the speech and remote running flags never star
     remote[mode === 'gsl' ? 'timer' : mode].running = true;
     client.apply(remote); assert.equal(client.intervals.size, 0);
   }
+});
+
+test('negotiated patches send only changed fields and keep a full recovery snapshot', () => {
+  sessionSync.open({ id: 'room', status: 'open' });
+  const initial = { notes: [{ id: 'n', text: 'n'.repeat(10000) }], timer: { sec: 60 } };
+  sessionSync.socket.receive({ type: 'state:init', state: initial, version: 1, room: { status: 'open' }, capabilities: { patches: true } });
+  const changed = { ...initial, timer: { sec: 55 } };
+  sessionSync.pushState(changed);
+  const message = sessionSync.socket.messages.at(-1);
+  assert.equal(message.type, 'state:patch');
+  assert.deepEqual(message.patch, { set: { timer: { sec: 55 } }, remove: [] });
+  assert.deepEqual(sessionSync.inFlightState, changed);
+  sessionSync.socket.receive({ type: 'state:ack', requestId: message.requestId, version: 2 });
+  assert.deepEqual(sessionSync.baseState, changed);
+});
+
+test('heartbeat detects a silent open socket and preserves pending edits for reconnection', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' });
+  sessionSync.socket.receive({ type: 'state:init', state: { notes: [] }, version: 1, room: { status: 'open' }, capabilities: { heartbeat: true }, serverTime: 100000 });
+  assert.equal(sessionSync.socket.messages.at(-1).type, 'sync:ping');
+  const socket = sessionSync.socket;
+  sessionSync.pushState({ notes: [{ id: 'pending' }] });
+  t.mock.timers.tick(10000);
+  assert.equal(sessionSync.status, 'disconnected');
+  assert.equal(socket.readyState, 3);
+  assert.equal(sessionSync.localState.notes[0].id, 'pending');
+  t.mock.timers.tick(1000);
+  assert.notEqual(sessionSync.socket, socket);
+});
+
+test('heartbeat tolerates healthy idle rooms, rejects old replies, and stops on exit', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sessionSync.open({ id: 'room', status: 'open' }, { mode: 'viewer' });
+  sessionSync.socket.receive({ type: 'state:init', state: {}, version: 1, room: { status: 'open' }, capabilities: { heartbeat: true }, serverTime: 100000 });
+  const socket = sessionSync.socket, ping = socket.messages.at(-1);
+  socket.receive({ type: 'sync:pong', id: 'stale', serverTime: 0 });
+  assert.equal(sessionSync.pingRequest.id, ping.id);
+  socket.receive({ type: 'sync:pong', id: ping.id, serverTime: 100005 });
+  assert.equal(sessionSync.pingRequest, null);
+  assert.ok(sessionSync.diagnostics().roundTripMs >= 0);
+  t.mock.timers.tick(5000);
+  const secondPing = socket.messages.at(-1);
+  assert.notEqual(secondPing.id, ping.id);
+  socket.receive({ type: 'sync:pong', id: secondPing.id, serverTime: 105005 });
+  assert.equal(sessionSync.status, 'connected');
+  sessionSync.close();
+  t.mock.timers.tick(60000);
+  assert.equal(sessionSync.socket, null);
 });

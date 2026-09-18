@@ -12,7 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env server/index.js",
-    "test": "node --test tests/navigation.test.mjs tests/auth-session.test.mjs tests/llm-report.test.mjs tests/session-sync.test.mjs tests/rubrics.test.mjs tests/help-requests.test.mjs && node tests/run-integration.mjs"
+    "test": "node --test tests/navigation.test.mjs tests/auth-session.test.mjs tests/llm-report.test.mjs tests/session-sync.test.mjs tests/projector-resilience.test.mjs tests/rubrics.test.mjs tests/help-requests.test.mjs && node tests/run-integration.mjs"
   },
   "dependencies": {
     "docx": "^9.6.1",

@@ -98,6 +98,20 @@ O app encerra a sala com `POST /api/rooms/:id/close` e corpo `{}`, depois da con
 
 ## Abas não sincronizadas
 
+### Cronômetros e conexão do projetor
+
+Os cronômetros da mesa usam tempo decorrido monotônico. O projetor calcula o tempo restante a partir do horário de término sincronizado com o servidor, sem reproduzir segundos antigos que chegaram em lote. Início, pausa, reset e troca de orador são enviados imediatamente; durante a contagem, o estado é salvo a cada 5 segundos. Atualizações parciais mantêm o controle de versão e a recuperação de alterações pendentes. Notas e histórico permanecem no estado completo, mas não são enviados ao projetor.
+
+O WebSocket mede o tempo de ida e volta a cada 5 segundos após uma resposta. Sem resposta por 10 segundos, reconecta mantendo as alterações pendentes. O projetor informa conexão lenta ou interrompida; depois de 15 segundos sem estado novo da mesa, suspende a contagem estimada até receber uma atualização. Um cliente lento mantém no máximo uma escrita de estado em andamento e o estado pendente mais recente; uma escrita travada por 10 segundos força reconexão.
+
+Publique backend e frontend juntos e atualize as páginas da mesa e do projetor em uma pausa da sessão. Clientes antigos continuam aceitos, mas precisam recarregar para obter a contagem por horário de término e as otimizações de envio.
+
+Para validar, use uma sala de teste: inicie 60 segundos, acrescente uma nota em outro navegador, simule uma interrupção de rede no projetor e reconecte. A contagem deve continuar durante uma interrupção curta e retomar pelo tempo atual, sem reproduzir a fila de segundos; pausa, reset e troca de orador devem continuar funcionando. Interrupções longas devem exibir o aviso de estimativa suspensa.
+
+Para suporte, `window.SimSDSync.diagnostics()` no console retorna somente status, versão, pendências, latência (`roundTripMs`), horários da última mensagem/estado e bytes na fila de saída. Não contém notas, credenciais ou histórico; não inicia testes de carga nem altera a sessão. `npm test` inclui cenários de atraso, callbacks acumulados, filas lentas, heartbeat, patches e preservação de dados com WebSockets reais.
+
+### Preferências de navegação
+
 Dentro de uma sala, abra **Config**, marque **Abas não sincronizadas** e salve. A opção vale para a sala: cada usuário navega em sua própria aba, enquanto notas, votos e os demais dados continuam compartilhados. A escolha da aba fica apenas na memória de cada navegador e não gera envio pelo WebSocket. Ao desativar a opção, a aba escolhida por quem salvou volta a ser compartilhada com os participantes.
 
 Em **Config → Projetor seguir este cliente**, o projetor acompanha as abas deste navegador, inclusive com abas não sincronizadas. A ação é imediata e não exige clicar em Salvar. O mesmo botão permite parar; outro cliente pode assumir o controle. Ao desconectar o cliente selecionado, a projeção retorna à aba compartilhada. A aba de notas permanece privada e mostra o modo de discurso na projeção. A seleção usa o WebSocket existente e não grava estado local nem altera a versão da sessão.

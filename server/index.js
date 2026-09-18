@@ -18,6 +18,9 @@ import { buildRubricDocx } from './rubricDocx.js';
 import { createHelpTicket, listHelpTickets, getHelpChat, postHelpMessage, changeHelpStatus, readHelpMessages } from './helpChat.js';
 import { serializeSessionState } from './sessionState.js';
 import { previewPendingImport } from './pendingImport.js';
+import { applyStatePatch } from './sessionPatch.js';
+import { viewerState, sendViewerState } from './viewerDelivery.js';
+import { projectedState } from './clockState.js';
 
 const DEV_SERVER = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT || (DEV_SERVER ? 4174 : 4173));
@@ -115,9 +118,18 @@ function listRooms(user) {
 }
 
 function broadcast(roomId, payload, except = null) {
-  const message = JSON.stringify(payload);
+  let message;
   for (const socket of socketsByRoom.get(roomId) || []) {
-    if (socket !== except && socket.readyState === WebSocket.OPEN) socket.send(message);
+    if (socket === except || socket.readyState !== WebSocket.OPEN) continue;
+    if (socket.simsdViewer && payload.type === 'state:update') sendViewerState(socket, payload);
+    else {
+      // Reconnect from the latest snapshot instead of queuing unbounded data.
+      if (socket.bufferedAmount > 2_500_000) { socket.terminate(); continue; }
+      if (socket.simsdViewer && payload.type.startsWith('room:')) socket.viewerPending = null;
+      socket.send(socket.simsdViewer && payload.state
+        ? JSON.stringify({ ...payload, report: undefined, state: viewerState(payload.state) })
+        : (message ??= JSON.stringify(payload)));
+    }
   }
 }
 
@@ -132,8 +144,11 @@ function broadcastPresence(roomId) {
 function closeRoom(room, user) {
   if (room.status === 'closed') return JSON.parse(db.prepare("SELECT payload FROM reports WHERE room_id=? AND report_type='final' ORDER BY id DESC LIMIT 1").get(room.id)?.payload || JSON.stringify(buildReport(room, 'final')));
   const endedAt = nowIso();
-  const state = JSON.parse(room.session_state || 'null');
+  const state = projectedState(JSON.parse(room.session_state || 'null'), Date.now());
   if (state) {
+    for (const key of ['timer', 'mod', 'unmod', 'solo']) {
+      if (state[key]?.playback) state[key].playback = { running: false };
+    }
     finishSessionActivities(state, 'session_closed', endedAt);
     appendSessionEvent(state, 'session.closed', { actor: { id: user.id, name: user.name } }, endedAt);
     db.prepare('UPDATE rooms SET session_state=?,state_version=state_version+1 WHERE id=?').run(JSON.stringify(state), room.id);
@@ -491,7 +506,8 @@ wss.on('connection', (ws, _req, room) => {
   socketsByRoom.get(room.id).add(ws);
   ws.send(JSON.stringify({
     type: 'state:init', room: publicRoom(room, ws.simsdUser), clientId: ws.simsdClientId, projector: projectorState(room.id),
-    state: JSON.parse(room.session_state || 'null'), version: room.state_version,
+    state: ws.simsdViewer ? viewerState(JSON.parse(room.session_state || 'null')) : JSON.parse(room.session_state || 'null'), version: room.state_version,
+    capabilities: { patches: true, heartbeat: true }, serverTime: Date.now(),
   }));
   broadcastPresence(room.id);
 
@@ -499,7 +515,7 @@ wss.on('connection', (ws, _req, room) => {
     let requestId;
     try {
       const message = JSON.parse(raw.toString());
-      if (!message || !['state:update', 'state:request', 'projector:select', 'projector:tab'].includes(message.type)) return;
+      if (!message || !['state:update', 'state:patch', 'state:request', 'projector:select', 'projector:tab', 'sync:ping'].includes(message.type)) return;
       requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 100) : undefined;
       const current = roomById(room.id);
       if (!ws.simsdViewer) {
@@ -511,8 +527,17 @@ wss.on('connection', (ws, _req, room) => {
         }
         ws.simsdUser = user;
       }
+      if (message.type === 'sync:ping') {
+        if (typeof message.id !== 'string' || message.id.length > 100) return;
+        if (ws.bufferedAmount > 2_500_000) return ws.terminate();
+        ws.send(JSON.stringify({ type: 'sync:pong', id: message.id, serverTime: Date.now() }));
+        return;
+      }
       if (message.type === 'state:request') {
-        if (current) ws.send(JSON.stringify({ type: 'state:snapshot', state: JSON.parse(current.session_state || 'null'), version: current.state_version, status: current.status, requestId }));
+        if (current) {
+          const state = JSON.parse(current.session_state || 'null');
+          ws.send(JSON.stringify({ type: 'state:snapshot', state: ws.simsdViewer ? viewerState(state) : state, version: current.state_version, status: current.status, requestId }));
+        }
         return;
       }
       if (ws.simsdViewer) return ws.send(JSON.stringify({ type: 'error', message: 'Modo espectador não pode modificar a sessão.', requestId }));
@@ -535,11 +560,12 @@ wss.on('connection', (ws, _req, room) => {
           type: 'state:conflict', state: JSON.parse(current.session_state || 'null'), version: current.state_version, requestId,
         }));
       }
-      const serialized = serializeSessionState(message.state);
+      const state = message.type === 'state:patch' ? applyStatePatch(JSON.parse(current.session_state || 'null'), message.patch) : message.state;
+      const serialized = serializeSessionState(state);
       const version = current.state_version + 1;
       const updatedAt = nowIso();
       db.prepare('UPDATE rooms SET session_state=?,state_version=?,updated_at=? WHERE id=?').run(serialized, version, updatedAt, room.id);
-      const payload = { type: 'state:update', state: message.state, version, updatedBy: publicUser(ws.simsdUser), updatedAt };
+      const payload = { type: 'state:update', state, version, updatedBy: publicUser(ws.simsdUser), updatedAt };
       ws.send(JSON.stringify({ type: 'state:ack', version, updatedAt, requestId }));
       broadcast(room.id, payload, ws);
     } catch (error) {
@@ -547,6 +573,7 @@ wss.on('connection', (ws, _req, room) => {
     }
   });
   ws.on('close', () => {
+    clearTimeout(ws.viewerWriteTimer); ws.viewerPending = null;
     if (projectorByRoom.get(room.id)?.socket === ws) {
       projectorByRoom.delete(room.id);
       broadcast(room.id, { type: 'projector:state', projector: null });

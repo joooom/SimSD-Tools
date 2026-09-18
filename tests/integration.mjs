@@ -517,4 +517,43 @@ recoverySocket.socket.close();
 await request(`/api/admin/rooms/${recoveryRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
 await request(previewPath, { cookie: admin.cookie, method: 'POST', body: { backup }, expected: 404 });
 
-console.log('Integration suite passed: auth roles, room ACL, WebSocket recovery/projector, notes/reports, administrative pending imports.');
+// Real protocol: partial writes retain history, viewers receive compact clocks,
+// stale/malformed writes cannot overwrite state, and heartbeat works read-only.
+const clockRoom = (await request('/api/rooms', { cookie: owner.cookie, method: 'POST', body: { name: 'Projector resilience', committeeKey: 'unesco' }, expected: 201 })).data.room;
+const clockWriter = await connect(clockRoom.id, owner.cookie);
+assert.equal((await clockWriter.inbox.next('state:init')).capabilities.patches, true);
+const clockState = { notes: [{ id: 'keep', text: 'history'.repeat(20000) }], events: [], timer: { sec: 60, total: 60, playback: { running: true, deadlines: { sec: Date.now() + 60000 } } } };
+clockWriter.socket.send(JSON.stringify({ type: 'state:update', baseVersion: 0, state: clockState }));
+await clockWriter.inbox.next('state:ack');
+const clockViewer = await connect(`${clockRoom.id}&mode=viewer`, owner.cookie);
+const initialClock = await clockViewer.inbox.next('state:init');
+assert.equal(initialClock.state.notes, undefined);
+assert.equal(initialClock.state.timer.playback.running, true);
+clockViewer.socket.send(JSON.stringify({ type: 'sync:ping', id: 'viewer-ping' }));
+const pong = await clockViewer.inbox.next('sync:pong');
+assert.equal(pong.id, 'viewer-ping'); assert.ok(Number.isFinite(pong.serverTime));
+clockWriter.socket.send(JSON.stringify({ type: 'state:patch', baseVersion: 1, requestId: 'clock-patch', patch: { set: { timer: { sec: 55, total: 60, playback: { running: false } } }, remove: [] } }));
+assert.equal((await clockWriter.inbox.next('state:ack')).requestId, 'clock-patch');
+const pausedClock = await clockViewer.inbox.next('state:update');
+assert.equal(pausedClock.state.timer.playback.running, false);
+assert.equal(pausedClock.state.notes, undefined);
+assert.ok(JSON.stringify(pausedClock).length < 1000);
+assert.equal((await request(`/api/rooms/${clockRoom.id}/state`, { cookie: owner.cookie })).data.state.notes[0].text, clockState.notes[0].text);
+clockWriter.socket.send(JSON.stringify({ type: 'state:patch', baseVersion: 1, patch: { set: { notes: [] }, remove: [] } }));
+assert.equal((await clockWriter.inbox.next('state:conflict')).version, 2);
+clockWriter.socket.send(JSON.stringify({ type: 'state:patch', baseVersion: 2, patch: { set: { notes: 'invalid' }, remove: [] } }));
+assert.match((await clockWriter.inbox.next('error')).message, /inválido/);
+clockViewer.socket.send(JSON.stringify({ type: 'state:patch', baseVersion: 2, patch: { set: {}, remove: [] } }));
+assert.match((await clockViewer.inbox.next('error')).message, /espectador/);
+// Closing between checkpoints materializes elapsed time and clears playback.
+clockWriter.socket.send(JSON.stringify({ type: 'state:patch', baseVersion: 2, patch: { set: { timer: { sec: 60, playback: { running: true, deadlines: { sec: Date.now() + 20000 } } } }, remove: [] } }));
+await clockWriter.inbox.next('state:ack');
+await request(`/api/rooms/${clockRoom.id}/close`, { cookie: owner.cookie, method: 'POST', body: {} });
+const closedClock = await clockViewer.inbox.next('room:closed');
+assert.equal(closedClock.state.timer.playback.running, false);
+assert.ok(closedClock.state.timer.sec <= 20);
+assert.equal(closedClock.report, undefined);
+clockViewer.socket.close(); clockWriter.socket.close();
+await request(`/api/admin/rooms/${clockRoom.id}`, { cookie: admin.cookie, method: 'DELETE' });
+
+console.log('Integration suite passed: auth roles, room ACL, WebSocket recovery/projector/patches/heartbeat, notes/reports, administrative pending imports.');

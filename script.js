@@ -1,3 +1,4 @@
+import { startCountdown, stopCountdown } from './src/countdown.js';
 import { CTRY, CAMARA, DELEGATIONS, FLAG_OVERRIDE, escapeHtml, escapeAttr, isoOf, flagImg } from './src/utils/flags.js';
 import { appendSessionEvent, finishSessionActivities } from './src/sessionEvents.js';
 import { EVALUATION_CRITERIA, EVALUATION_GROUPS } from './src/evaluationCriteria.js';
@@ -390,7 +391,7 @@ function goSetup(){
   renderCountryGrid();
 }
 function stopAll(){
-  ['timer','mod','unmod','solo'].forEach(k=>{if(S[k]&&S[k].running){clearInterval(S[k].iv);S[k].running=false;}});
+  ['timer','mod','unmod','solo'].forEach(k=>{if(S[k]&&S[k].running){stopCountdown(S[k]);S[k].running=false;}});
   document.getElementById('btn-gsl-pp').textContent='play_arrow';
   document.getElementById('btn-mod-pp').textContent='play_arrow';
   document.getElementById('btn-unmod-pp').textContent='play_arrow';
@@ -686,7 +687,7 @@ function saveConfig(){
   }
   if(defaultTime!==S.config.defaultTime){
     finishActivity('gsl',S.timer.sec,'reconfigured');
-    clearInterval(S.timer.iv);S.timer.running=false;
+    stopCountdown(S.timer);S.timer.running=false;
     document.getElementById('btn-gsl-pp').textContent='play_arrow';
     S.timer.total=defaultTime;S.timer.sec=defaultTime;
   }
@@ -742,20 +743,21 @@ function gslPP(){
   if(!S.speakers[S.curIdx])return;
   activityToggle('gsl','speech','gsl',S.speakers[S.curIdx].c,S.timer.sec,S.timer.running);
   if(S.timer.running){
-    clearInterval(S.timer.iv);S.timer.running=false;
+    stopCountdown(S.timer);S.timer.running=false;
     document.getElementById('btn-gsl-pp').textContent='play_arrow';
   } else {
     if(!S.speakers.length)return;
     S.timer.running=true;
     document.getElementById('btn-gsl-pp').textContent='pause';
-    S.timer.iv=setInterval(()=>{
-      if(S.timer.sec<=0){clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';gslNext();return;}
-      S.timer.sec--;updateGslTimer();save();
-    },1000);
+    S.timer.iv=startCountdown(S.timer,(values,checkpoint)=>{
+      S.timer.sec=values.sec;
+      if(S.timer.sec<=0){gslNext();return;}
+      updateGslTimer();if(checkpoint)save();
+    });
   }
   save();
 }
-function gslReset(){finishActivity('gsl',S.timer.sec,'reset');clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
+function gslReset(){finishActivity('gsl',S.timer.sec,'reset');stopCountdown(S.timer);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';S.timer.sec=S.timer.total;S.turnStartSec=S.timer.total;updateGslTimer();save();}
 function gslStop(){
   // "Parar": finaliza o discurso do orador atual, registrando o tempo falado
   // no histórico e encerrando o turno (igual a "Próximo Orador").
@@ -768,7 +770,7 @@ function gslStop(){
 function gslPreset(sec,el){gslReset();S.timer.total=sec;S.timer.sec=sec;S.turnStartSec=sec;document.querySelectorAll('.pchip').forEach(p=>p.classList.remove('on'));if(el)el.classList.add('on');updateGslTimer();save();}
 function gslCustom(){const v=parseInt(document.getElementById('ct-sec').value);if(isNaN(v)||v<5)return;gslReset();S.timer.total=v;S.timer.sec=v;S.turnStartSec=v;document.querySelectorAll('.pchip').forEach(p=>p.classList.remove('on'));updateGslTimer();save();document.getElementById('ct-sec').value='';}
 function gslNext(){
-  clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
+  stopCountdown(S.timer);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
   if(!S.speakers.length)return;
   const cur=S.speakers[S.curIdx];
   const spent=S.turnStartSec - S.timer.sec;   // how long the current speaker actually spoke
@@ -815,7 +817,7 @@ function recordSpeech(cur, timeSpent, opts){
 }
 function yieldToChair(){
   // Current speaker spoke, then yields remaining time back to the Chair (turn ends).
-  clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
+  stopCountdown(S.timer);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
   const cur=S.speakers[S.curIdx];
   if(!cur)return;
   const spent=S.turnStartSec - S.timer.sec;
@@ -831,7 +833,7 @@ function yieldToCountry(){
   const code=document.getElementById('yield-country-sel').value;
   if(!code){return;}
   const cc=rosterFind(code);if(!cc)return;
-  clearInterval(S.timer.iv);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
+  stopCountdown(S.timer);S.timer.running=false;document.getElementById('btn-gsl-pp').textContent='play_arrow';
   const cur=S.speakers[S.curIdx];
   if(!cur)return;
   // A (current) spoke up to now, then yields the REMAINING time to B.
@@ -1417,18 +1419,17 @@ function updateModDisplay(){
 function modPP(){
   activityToggle('mod-debate','debate','mod',null,S.mod.totalSec,S.mod.running);
   if(S.mod.spks[0])activityToggle('mod','speech','mod',S.mod.spks[0].c,S.mod.spkSec,S.mod.running);
-  if(S.mod.running){clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';}
+  if(S.mod.running){stopCountdown(S.mod);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';}
   else{S.mod.running=true;document.getElementById('btn-mod-pp').textContent='pause';
-    S.mod.iv=setInterval(()=>{
-      if(S.mod.spkSec>0)S.mod.spkSec--;
-      if(S.mod.totalSec>0)S.mod.totalSec--;
+    S.mod.iv=startCountdown(S.mod,(values,checkpoint)=>{
+      S.mod.spkSec=values.spkSec;S.mod.totalSec=values.totalSec;
       if(S.mod.spkSec<=0||S.mod.totalSec<=0)modNext();
-      else{updateModDisplay();save();}
-    },1000);}
+      else{updateModDisplay();if(checkpoint)save();}
+    });}
   save();
 }
-function modReset(){finishActivity('mod',S.mod.spkSec,'reset');finishActivity('mod-debate',S.mod.totalSec,'reset');clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
-function modNext(){finishActivity('mod',S.mod.spkSec,S.mod.spkSec<=0?'time_expired':'next_speaker');if(S.mod.totalSec<=0)finishActivity('mod-debate',S.mod.totalSec,'time_expired');else if(S.eventActivities['mod-debate'])logEvent('debate.paused',{activityId:S.eventActivities['mod-debate'].id,mode:'mod',remainingSeconds:S.mod.totalSec,reason:'speaker_finished'});clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
+function modReset(){finishActivity('mod',S.mod.spkSec,'reset');finishActivity('mod-debate',S.mod.totalSec,'reset');stopCountdown(S.mod);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.totalSec=S.mod.totalTotal;S.mod.spkSec=S.mod.spkTotal;updateModDisplay();save();}
+function modNext(){finishActivity('mod',S.mod.spkSec,S.mod.spkSec<=0?'time_expired':'next_speaker');if(S.mod.totalSec<=0)finishActivity('mod-debate',S.mod.totalSec,'time_expired');else if(S.eventActivities['mod-debate'])logEvent('debate.paused',{activityId:S.eventActivities['mod-debate'].id,mode:'mod',remainingSeconds:S.mod.totalSec,reason:'speaker_finished'});stopCountdown(S.mod);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';S.mod.spkSec=S.mod.spkTotal;if(S.mod.spks.length>0)S.mod.spks.shift();S.mod.cur=0;updateModDisplay();renderModList();save();}
 function renderModList(){
   // Current speaker = first in the mod queue (independent from the GSL list)
   const cur=S.mod.spks[0];
@@ -1462,12 +1463,12 @@ function removeModSpk(i){if(i===0)finishActivity('mod',S.mod.spkSec,'speaker_rem
 function updateUnmodDisplay(){document.getElementById('unmod-d').textContent=`${fmt(S.unmod.sec)} / ${fmt(S.unmod.total)}`;}
 function unmodPP(){
   activityToggle('unmod','debate','unmod',null,S.unmod.sec,S.unmod.running);
-  if(S.unmod.running){clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';}
+  if(S.unmod.running){stopCountdown(S.unmod);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';}
   else{S.unmod.running=true;document.getElementById('btn-unmod-pp').textContent='pause';
-    S.unmod.iv=setInterval(()=>{if(S.unmod.sec<=0){unmodReset();return;}S.unmod.sec--;updateUnmodDisplay();save();},1000);}
+    S.unmod.iv=startCountdown(S.unmod,(values,checkpoint)=>{S.unmod.sec=values.sec;if(S.unmod.sec<=0){unmodReset();return;}updateUnmodDisplay();if(checkpoint)save();});}
   save();
 }
-function unmodReset(){finishActivity('unmod',S.unmod.sec,S.unmod.sec<=0?'time_expired':'reset');clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
+function unmodReset(){finishActivity('unmod',S.unmod.sec,S.unmod.sec<=0?'time_expired':'reset');stopCountdown(S.unmod);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';S.unmod.sec=S.unmod.total;updateUnmodDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    CAUCUS SETTINGS
@@ -1492,10 +1493,10 @@ function applyCaucus(){
   const spk=parseInt(document.getElementById('cau-spk').value)||60;
   if(S.caucusTarget==='mod'){
     finishActivity('mod',S.mod.spkSec,'reconfigured');finishActivity('mod-debate',S.mod.totalSec,'reconfigured');
-    clearInterval(S.mod.iv);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';
+    stopCountdown(S.mod);S.mod.running=false;document.getElementById('btn-mod-pp').textContent='play_arrow';
   }else{
     finishActivity('unmod',S.unmod.sec,'reconfigured');
-    clearInterval(S.unmod.iv);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';
+    stopCountdown(S.unmod);S.unmod.running=false;document.getElementById('btn-unmod-pp').textContent='play_arrow';
   }
   logEvent('debate.configured',{mode:S.caucusTarget,totalSeconds:tot,speakerSeconds:S.caucusTarget==='mod'?spk:null});
   if(S.caucusTarget==='mod'){S.mod.totalTotal=tot;S.mod.totalSec=tot;S.mod.spkTotal=spk;S.mod.spkSec=spk;updateModDisplay();}
@@ -1512,7 +1513,7 @@ function initSolo(){
   sel.onchange=()=>{
     const code=sel.value;
     finishActivity('solo',S.solo.sec,'speaker_changed');
-    clearInterval(S.solo.iv);S.solo.running=false;S.solo.sec=S.solo.total;
+    stopCountdown(S.solo);S.solo.running=false;S.solo.sec=S.solo.total;
     document.getElementById('btn-solo-pp').textContent='play_arrow';updateSoloDisplay();
     S.solo.code=code;
     logEvent('speaker.selected',{mode:'solo',participant:code||null});
@@ -1531,12 +1532,12 @@ function updateSoloDisplay(){const d=document.getElementById('solo-timer'),b=doc
 function soloPP(){
   if(!S.solo.code)return;
   activityToggle('solo','speech','solo',S.solo.code,S.solo.sec,S.solo.running);
-  if(S.solo.running){clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';}
+  if(S.solo.running){stopCountdown(S.solo);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';}
   else{S.solo.running=true;document.getElementById('btn-solo-pp').textContent='pause';
-    S.solo.iv=setInterval(()=>{if(S.solo.sec<=0){soloReset();return;}S.solo.sec--;updateSoloDisplay();save();},1000);}
+    S.solo.iv=startCountdown(S.solo,(values,checkpoint)=>{S.solo.sec=values.sec;if(S.solo.sec<=0){soloReset();return;}updateSoloDisplay();if(checkpoint)save();});}
   save();
 }
-function soloReset(){finishActivity('solo',S.solo.sec,S.solo.sec<=0?'time_expired':'reset');clearInterval(S.solo.iv);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
+function soloReset(){finishActivity('solo',S.solo.sec,S.solo.sec<=0?'time_expired':'reset');stopCountdown(S.solo);S.solo.running=false;document.getElementById('btn-solo-pp').textContent='play_arrow';S.solo.sec=S.solo.total;updateSoloDisplay();save();}
 
 /* ══════════════════════════════════════════════════════
    POPULATE SELECTS
@@ -1652,7 +1653,7 @@ function applyRemoteState(snapshot){
   for(const key of kept){
     // Keep the existing interval and its progress, including across a reconnect
     // whose snapshot may be a few ticks behind. Other shared fields still merge.
-    const fields=key==='mod'?['totalSec','spkSec','running','iv']:['sec','running','iv'];
+    const fields=key==='mod'?['totalSec','spkSec','running','iv','playback']:['sec','running','iv','playback'];
     for(const field of fields)S[key][field]=previous[key][field];
   }
   if(activeRoomId&&S.config.independentTabs===true)localActiveTab=localActiveTab||previousTab||S.activeTab;
