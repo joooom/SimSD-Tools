@@ -1,4 +1,4 @@
-const CACHE_NAME = 'simsd-chair-shell-v5';
+const CACHE_NAME = 'simsd-chair-shell-v6';
 
 function discoverLocalAssets(text, baseUrl) {
   const values = [];
